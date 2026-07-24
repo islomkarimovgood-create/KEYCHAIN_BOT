@@ -15,8 +15,14 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ["BOT_TOKEN"]
-OWNER_CHAT_ID = os.environ["OWNER_CHAT_ID"]
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "")
+if not BOT_TOKEN:
+    print("ERROR: BOT_TOKEN not set!", flush=True)
+    exit(1)
+OWNER_CHAT_ID = os.environ.get("OWNER_CHAT_ID", "")
+if not OWNER_CHAT_ID:
+    print("ERROR: OWNER_CHAT_ID not set!", flush=True)
+    exit(1)
 WORK_DIR = Path("/tmp/keychains")
 PREVIEW_DIR = Path("/tmp/previews")
 
