@@ -1,25 +1,29 @@
-FROM python:3.11-slim
+# Ubuntu 22.04 — openscad есть в стандартных репозиториях
+FROM ubuntu:22.04
 
-# ── System packages ──────────────────────────────────────────────────────────
-RUN apt-get update && apt-get install -y --no-install-recommends \
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ── Системные пакеты ─────────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
     openscad \
     fontconfig \
-    libglu1-mesa \
-    libxi6 \
     xvfb \
+    libglu1-mesa \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Download Google Fonts via Python (retry-safe) ────────────────────────────
+# ── Скачать шрифты (ошибки не фатальны — упавший шрифт пропускается) ─────────
 RUN mkdir -p /usr/share/fonts/keychain /root/.local/share/fonts
 COPY download_fonts.py /tmp/download_fonts.py
 RUN python3 /tmp/download_fonts.py && fc-cache -f -v
 
-# ── Python dependencies ──────────────────────────────────────────────────────
+# ── Python зависимости ───────────────────────────────────────────────────────
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-# ── App code ─────────────────────────────────────────────────────────────────
+# ── Код бота ─────────────────────────────────────────────────────────────────
 COPY . .
 
-CMD ["xvfb-run", "--auto-servernum", "python", "bot.py"]
+CMD ["xvfb-run", "--auto-servernum", "python3", "bot.py"]
