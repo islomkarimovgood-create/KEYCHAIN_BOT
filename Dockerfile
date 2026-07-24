@@ -26,4 +26,4 @@ RUN pip3 install --no-cache-dir -r requirements.txt
 # ── Код бота ─────────────────────────────────────────────────────────────────
 COPY . .
 
-CMD ["xvfb-run", "--auto-servernum", "python3", "bot.py"]
+CMD ["python3", "bot.py"]
