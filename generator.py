@@ -169,7 +169,7 @@ def build_3mf(back_stl: bytes, text_stl: bytes,
 def _render_stl(scad_text: str, out_stl: Path, timeout: int = 90):
     scad_file = out_stl.with_suffix(".scad")
     scad_file.write_text(scad_text, encoding="utf-8")
-    cmd = ["openscad", "-o", str(out_stl), str(scad_file)]
+    cmd = ["xvfb-run", "--auto-servernum", "openscad", "-o", str(out_stl), str(scad_file)]
     result = subprocess.run(cmd, capture_output=True, timeout=timeout)
     if result.returncode != 0:
         raise RuntimeError(
