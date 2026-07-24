@@ -239,11 +239,28 @@ async def cancel(update: Update, context):
     return ConversationHandler.END
 
 
+async def post_init(app):
+    """Sends a startup message to the owner so we know the bot is alive."""
+    try:
+        await app.bot.send_message(
+            chat_id=OWNER_CHAT_ID,
+            text="🤖 Бот запущен и готов к работе!",
+        )
+        logger.info("Startup message sent to owner")
+    except Exception as e:
+        logger.error(f"Could not send startup message: {e}")
+
+
 def main():
     WORK_DIR.mkdir(parents=True, exist_ok=True)
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .build()
+    )
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
