@@ -25,7 +25,7 @@ NAME, FONT, TEXT_COLOR, BACK_COLOR, CONFIRM, CONTACT = range(6)
 
 FONTS = [
     "Pacifico", "Lobster", "Cookie", "Dancing Script",
-    "Chewy", "DynaPuff", "Courgette", "Bangers",
+    "Satisfy", "Righteous", "Courgette", "Bangers",
 ]
 
 COLORS = {
