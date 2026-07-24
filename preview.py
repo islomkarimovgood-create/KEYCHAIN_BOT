@@ -29,8 +29,8 @@ FONT_FILES = {
     "Lobster":        "Lobster-Regular.ttf",
     "Cookie":         "Cookie-Regular.ttf",
     "Dancing Script": "DancingScript-Bold.ttf",
-    "Chewy":          "Chewy-Regular.ttf",
-    "DynaPuff":       "DynaPuff-Regular.ttf",
+    "Satisfy":         "Satisfy-Regular.ttf",
+    "Righteous":       "Righteous-Regular.ttf",
     "Courgette":      "Courgette-Regular.ttf",
     "Bangers":        "Bangers-Regular.ttf",
 }
