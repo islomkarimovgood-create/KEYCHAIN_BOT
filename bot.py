@@ -52,6 +52,32 @@ OWNER_CHAT_ID = CHAT_ID
 WORK_DIR      = Path("/tmp/keychains")
 PREVIEW_DIR   = Path("/tmp/previews")
 
+# Только одна генерация 3D-модели одновременно — иначе не хватит памяти
+GEN_LOCK = asyncio.Semaphore(1)
+
+
+def cleanup_temp(*paths):
+    """Удаляет временные файлы, чтобы диск не заполнялся."""
+    for p in paths:
+        try:
+            if p and Path(p).exists():
+                Path(p).unlink()
+        except Exception:
+            pass
+
+
+def cleanup_old_files(max_age_sec=600):
+    """Чистит файлы старше 10 минут во временных папках."""
+    import time
+    now = time.time()
+    for folder in (WORK_DIR, PREVIEW_DIR):
+        try:
+            for f in folder.rglob("*"):
+                if f.is_file() and now - f.stat().st_mtime > max_age_sec:
+                    f.unlink(missing_ok=True)
+        except Exception:
+            pass
+
 # ── Состояния диалога ─────────────────────────────────────────────────────────
 (LANG, TYPE,
  NAME, FONT, FONT_SIZE, TEXT_HEIGHT, BACK_HEIGHT, RING_SIZE,
@@ -602,24 +628,26 @@ async def get_contact(update: Update, context):
     if order_type == "named":
         try:
             work_dir = WORK_DIR / str(update.effective_user.id)
+            cleanup_old_files()
             loop = asyncio.get_running_loop()
-            file_3mf = await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    functools.partial(
-                        generate_keychain_3mf,
-                        name=d["name"], font=d["font"],
-                        back_color=d.get("back_color", "Black"),
-                        text_color=d.get("text_color", "Pink"),
-                        work_dir=work_dir,
-                        font_size=d.get("font_size", 16),
-                        text_height=d.get("text_height", 2.0),
-                        back_height=d.get("back_height", 3.0),
-                        ring_radius=d.get("ring_size", 4.0) / 2,
+            async with GEN_LOCK:
+                file_3mf = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        functools.partial(
+                            generate_keychain_3mf,
+                            name=d["name"], font=d["font"],
+                            back_color=d.get("back_color", "Black"),
+                            text_color=d.get("text_color", "Pink"),
+                            work_dir=work_dir,
+                            font_size=d.get("font_size", 16),
+                            text_height=d.get("text_height", 2.0),
+                            back_height=d.get("back_height", 3.0),
+                            ring_radius=d.get("ring_size", 4.0) / 2,
+                        ),
                     ),
-                ),
-                timeout=110,
-            )
+                    timeout=110,
+                )
         except asyncio.TimeoutError:
             logger.error("3MF generation timed out")
             error_note = "\n⚠️ Генерация заняла слишком долго — сделайте файл вручную."
@@ -682,16 +710,58 @@ async def get_contact(update: Update, context):
                 parse_mode="Markdown",
             )
 
-    await msg.delete()
+    # Чистим временные файлы — иначе диск и память переполнятся
+    cleanup_temp(file_3mf, d.get("logo_path"))
+    try:
+        work_dir = WORK_DIR / str(update.effective_user.id)
+        if work_dir.exists():
+            for f in work_dir.glob("*"):
+                f.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    try:
+        await msg.delete()
+    except Exception:
+        pass
     await update.message.reply_text(t(context, "order_accepted"), parse_mode="Markdown")
+    context.user_data.clear()
     return ConversationHandler.END
 
 async def cancel(update: Update, context):
     await update.message.reply_text(t(context, "cancelled"))
     return ConversationHandler.END
 
+_conflict_notified = False
+
 async def error_handler(update, context):
     """Catches every unhandled error so the bot never crashes."""
+    global _conflict_notified
+
+    err_text = str(context.error)
+
+    # ── Конфликт: работает второй экземпляр бота ────────────────────────────
+    if "Conflict" in err_text or "terminated by other" in err_text:
+        if not _conflict_notified:
+            _conflict_notified = True
+            try:
+                await context.bot.send_message(
+                    OWNER_CHAT_ID,
+                    "🛑 *Обнаружен второй запущенный бот!*\n\n"
+                    "Два экземпляра конфликтуют за один токен.\n\n"
+                    "*Что сделать на Railway:*\n"
+                    "1. Откройте проект → посмотрите сколько сервисов на холсте\n"
+                    "2. Сервис → *Deployments* → оставьте только один ACTIVE\n"
+                    "3. Лишние: `⋮` → Remove\n\n"
+                    "_Этот бот сейчас остановится, чтобы не мешать._",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+        # Останавливаем процесс — Railway перезапустит один экземпляр
+        logger.error("Conflict detected — shutting down this instance")
+        os._exit(1)
+
     err = "".join(traceback.format_exception(
         type(context.error), context.error, context.error.__traceback__))[-1500:]
     logger.error(f"Unhandled error: {err}")
@@ -713,6 +783,11 @@ async def error_handler(update, context):
         pass
 
 
+async def periodic_cleanup(context):
+    """Раз в 5 минут удаляет старые временные файлы."""
+    cleanup_old_files(max_age_sec=600)
+
+
 async def post_init(app):
     try:
         await app.bot.send_message(chat_id=OWNER_CHAT_ID, text="🤖 Бот запущен и готов к работе!")
@@ -724,7 +799,21 @@ def main():
     WORK_DIR.mkdir(parents=True, exist_ok=True)
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
 
-    app = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init)
+        .connect_timeout(30)
+        .read_timeout(30)
+        .write_timeout(30)
+        .pool_timeout(30)
+        .get_updates_read_timeout(40)
+        .build()
+    )
+
+    # Фоновая очистка каждые 5 минут
+    if app.job_queue:
+        app.job_queue.run_repeating(periodic_cleanup, interval=300, first=300)
 
     conv = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
