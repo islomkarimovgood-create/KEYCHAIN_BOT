@@ -195,10 +195,27 @@ def t(context, key):
     return T[lang].get(key, T["ru"].get(key, key))
 
 # ── Параметры ─────────────────────────────────────────────────────────────────
-FONTS = [
+# Шрифты с поддержкой кириллицы (русский / таджикский)
+FONTS_CYRILLIC = [
+    "Pacifico", "Lobster", "Russo One", "Yeseva One",
+    "Neucha", "Play", "Comfortaa", "Ruslan Display",
+]
+
+# Шрифты только для латиницы
+FONTS_LATIN = [
     "Pacifico", "Lobster", "Cookie", "Dancing Script",
     "Satisfy", "Righteous", "Courgette", "Bangers",
 ]
+
+
+def has_cyrillic(text: str) -> bool:
+    """True если в тексте есть кириллические символы."""
+    return any("\u0400" <= ch <= "\u04FF" for ch in text)
+
+
+def fonts_for(text: str):
+    """Возвращает список шрифтов, подходящих для данного текста."""
+    return FONTS_CYRILLIC if has_cyrillic(text) else FONTS_LATIN
 
 FONT_SIZES   = ["10", "12", "14", "16", "18", "20"]   # мм
 TEXT_HEIGHTS = ["1", "2", "3"]                          # мм
@@ -293,9 +310,20 @@ async def get_name(update: Update, context):
         await update.message.reply_text(t(context, "name_too_long"))
         return NAME
     context.user_data["name"] = name
+
+    available = fonts_for(name)
+    note = ""
+    if has_cyrillic(name):
+        note = {
+            "ru": "\n\n_Показаны шрифты с поддержкой кириллицы_",
+            "tj": "\n\n_Хатҳои дорои дастгирии кириллица нишон дода шудаанд_",
+            "en": "\n\n_Showing fonts that support Cyrillic_",
+        }.get(context.user_data.get("lang", "ru"), "")
+
     await update.message.reply_text(
-        t(context, "choose_font"),
-        reply_markup=kb(FONTS, cols=2),
+        t(context, "choose_font") + note,
+        parse_mode="Markdown",
+        reply_markup=kb(available, cols=2),
     )
     return FONT
 
@@ -506,7 +534,7 @@ async def get_contact(update: Update, context):
             error_note = "\n⚠️ Генерация заняла слишком долго — сделайте файл вручную."
         except Exception as e:
             logger.error(f"3MF error: {e}")
-            error_note = "\n⚠️ Файл не сгенерирован — детали в заказе."
+            error_note = f"\n⚠️ Файл не сгенерирован.\n<b>Причина:</b> {str(e)[:400]}"
 
     lang = d.get("lang", "ru")
     order_lines = [
@@ -536,7 +564,13 @@ async def get_contact(update: Update, context):
         order_lines.append(f"🖤 Подложка: {d.get('back_color_label','?')}")
 
     order_text = "\n".join(order_lines)
-    await context.bot.send_message(OWNER_CHAT_ID, order_text, parse_mode="Markdown")
+    try:
+        await context.bot.send_message(OWNER_CHAT_ID, order_text, parse_mode="Markdown")
+    except Exception:
+        # Спецсимволы в ошибке могут сломать Markdown — шлём как обычный текст
+        import re as _re
+        plain = _re.sub(r"[*_`\[\]]", "", order_text)
+        await context.bot.send_message(OWNER_CHAT_ID, plain)
 
     # Если есть логотип — пересылаем владельцу
     if order_type == "logo" and d.get("logo_path"):
