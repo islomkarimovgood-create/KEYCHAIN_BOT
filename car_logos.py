@@ -313,3 +313,67 @@ def load_available():
 
 if __name__ == "__main__":
     download_all()
+
+def probe(slug: str):
+    """
+    Пробует все источники для одной марки и возвращает список строк-отчётов.
+    Нужно чтобы понять, какой именно URL отдаёт ошибку.
+    """
+    import urllib.request
+
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; logo-fetch/1.0)"}
+    bases = [
+        "https://cdn.jsdelivr.net/npm/simple-icons@13/icons/{slug}.svg",
+        "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/{slug}.svg",
+        "https://unpkg.com/simple-icons@13/icons/{slug}.svg",
+        "https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/{slug}.svg",
+    ]
+
+    report = []
+    for candidate in ALT_SLUGS.get(slug, [slug]):
+        for base in bases:
+            url = base.format(slug=candidate)
+            short = url.split("/")[2] + "/..." + candidate + ".svg"
+            try:
+                req = urllib.request.Request(url, headers=headers)
+                with urllib.request.urlopen(req, timeout=20) as r:
+                    data = r.read()
+                if b"<svg" in data[:400]:
+                    report.append(f"OK   {short} ({len(data)} B)")
+                    return report
+                report.append(f"BAD  {short} — не SVG")
+            except Exception as e:
+                code = getattr(e, "code", "")
+                report.append(f"FAIL {short} — {code or str(e)[:40]}")
+
+    png_slug = _png_name(slug)
+    for base in PNG_SOURCES:
+        url = base.format(slug=png_slug)
+        short = "png/" + png_slug + ".png"
+        try:
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=25) as r:
+                data = r.read()
+            report.append(f"OK   {short} ({len(data)} B) — растр найден")
+            return report
+        except Exception as e:
+            code = getattr(e, "code", "")
+            report.append(f"FAIL {short} — {code or str(e)[:40]}")
+
+    return report
+
+
+def save_svg(slug: str, svg_bytes: bytes) -> str:
+    """Сохраняет эмблему, добавленную вручную."""
+    import os
+    d = _writable_dir()
+    path = os.path.join(d, f"{slug}.svg")
+    with open(path, "wb") as f:
+        f.write(svg_bytes)
+    return path
+
+
+def add_brand(name: str, slug: str):
+    """Добавляет марку в список, если её там ещё нет."""
+    if not any(sl == slug for _, sl in CAR_BRANDS):
+        CAR_BRANDS.append((name, slug))
