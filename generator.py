@@ -4,8 +4,21 @@ Generates two STL files (back plate + text) via OpenSCAD CLI,
 then packages them into a Bambu-compatible .3mf with AMS extruder assignments.
 """
 
-import struct, subprocess, zipfile
+import struct, subprocess, zipfile, resource
 from pathlib import Path
+
+# Максимум памяти для одного процесса OpenSCAD (МБ).
+# Если он превысит лимит — упадёт сам, а не утянет весь контейнер.
+OPENSCAD_MEM_LIMIT_MB = 300
+
+
+def _limit_memory():
+    """Вызывается в дочернем процессе перед запуском OpenSCAD."""
+    try:
+        limit = OPENSCAD_MEM_LIMIT_MB * 1024 * 1024
+        resource.setrlimit(resource.RLIMIT_AS, (limit, limit))
+    except Exception:
+        pass
 
 
 # Имя шрифта в боте -> имя семейства, которое понимает OpenSCAD/fontconfig
@@ -215,12 +228,14 @@ def _render_stl(scad_text, out_stl, timeout=60):
     # Пробуем binary STL; если версия OpenSCAD не знает флаг — обычный вызов
     cmd = ["xvfb-run", "--auto-servernum", "openscad", "--render",
            "--export-format", "binstl", "-o", str(out_stl), str(scad_file)]
-    result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+    result = subprocess.run(cmd, capture_output=True, timeout=timeout,
+                            preexec_fn=_limit_memory)
 
     if result.returncode != 0 and b"export-format" in result.stderr.lower():
         cmd = ["xvfb-run", "--auto-servernum", "openscad", "--render",
                "-o", str(out_stl), str(scad_file)]
-        result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+        result = subprocess.run(cmd, capture_output=True, timeout=timeout,
+                            preexec_fn=_limit_memory)
 
     stderr = result.stderr.decode(errors="replace")
     if result.returncode != 0:
