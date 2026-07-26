@@ -282,3 +282,85 @@ def generate_keychain_3mf(
     build_3mf(back_stl.read_bytes(), text_stl.read_bytes(),
               back_color, text_color, str(out_3mf))
     return str(out_3mf)
+
+# ── Шаблон для SVG-логотипов (эмблемы авто и логотипы клиентов) ─────────────
+
+SVG_TEMPLATE = """\
+$fn = 24;
+
+svg_file  = "{svg_path}";
+logo_size = {logo_size};
+text_h    = {text_height};
+back_h    = {back_height};
+border    = {border};
+ring_r    = {ring_radius};
+part      = "{part}";
+
+if (part == "back") back_with_hole();
+if (part == "text") logo_top();
+
+module shape() {{
+    resize([0, logo_size, 0], auto = true)
+        import(svg_file, center = true);
+}}
+
+// Кольцо крепится сверху — работает для логотипов любой ширины
+ring_y = logo_size / 2 + border + ring_r + 1;
+
+module back_plate() {{
+    linear_extrude(back_h) offset(r = border) shape();
+    hull() {{
+        translate([0, ring_y, 0])           cylinder(h = back_h, r = ring_r + 2);
+        translate([0, ring_y - ring_r - 4, 0]) cylinder(h = back_h, r = ring_r + 2);
+    }}
+}}
+
+module back_with_hole() {{
+    difference() {{
+        back_plate();
+        translate([0, ring_y, -1]) cylinder(h = back_h + 2, r = ring_r);
+    }}
+}}
+
+module logo_top() {{
+    translate([0, 0, back_h]) linear_extrude(text_h) shape();
+}}
+"""
+
+
+def generate_logo_3mf(
+    svg_path: str,
+    back_color: str,
+    text_color: str,
+    work_dir,
+    name: str = "logo",
+    logo_size: float = 30.0,
+    text_height: float = 2.0,
+    back_height: float = 3.0,
+    ring_radius: float = 2.0,
+    border: float = 2.0,
+) -> str:
+    """Собирает .3mf из SVG-контура — обводка такая же, как у именных брелоков."""
+    work_dir = Path(work_dir)
+    work_dir.mkdir(parents=True, exist_ok=True)
+
+    if not Path(svg_path).exists():
+        raise RuntimeError(f"SVG не найден: {svg_path}")
+
+    safe = "".join(c for c in name if c.isalnum() or c in "-_")[:20] or "logo"
+    back_stl = work_dir / f"{safe}_back.stl"
+    text_stl = work_dir / f"{safe}_top.stl"
+    out_3mf  = work_dir / f"{safe}_keychain.3mf"
+
+    params = dict(
+        svg_path=str(svg_path), logo_size=logo_size,
+        text_height=text_height, back_height=back_height,
+        border=border, ring_radius=ring_radius,
+    )
+
+    _render_stl(SVG_TEMPLATE.format(**params, part="back"), back_stl)
+    _render_stl(SVG_TEMPLATE.format(**params, part="text"), text_stl)
+
+    build_3mf(back_stl.read_bytes(), text_stl.read_bytes(),
+              back_color, text_color, str(out_3mf))
+    return str(out_3mf)
