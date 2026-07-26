@@ -1,12 +1,14 @@
 import os, sys, logging, asyncio, functools, traceback, urllib.request, urllib.parse
 
-# ── Диагностика при старте (без библиотек) ───────────────────────────────────
+# ── Диагностика при старте (без сторонних библиотек) ─────────────────────────
 TOKEN   = os.environ.get("BOT_TOKEN", "")
 CHAT_ID = os.environ.get("OWNER_CHAT_ID", "")
 
+
 def tg_send(text):
     if not TOKEN or not CHAT_ID:
-        print(f"ENV MISSING", flush=True); return
+        print("ENV MISSING", flush=True)
+        return
     try:
         url  = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
         data = urllib.parse.urlencode({"chat_id": CHAT_ID, "text": text}).encode()
@@ -14,9 +16,12 @@ def tg_send(text):
     except Exception as e:
         print(f"TG error: {e}", flush=True)
 
+
 print("=== BOT STARTING ===", flush=True)
-if not TOKEN: print("NO BOT_TOKEN", flush=True); sys.exit(1)
-if not CHAT_ID: print("NO OWNER_CHAT_ID", flush=True); sys.exit(1)
+if not TOKEN:
+    print("NO BOT_TOKEN", flush=True); sys.exit(1)
+if not CHAT_ID:
+    print("NO OWNER_CHAT_ID", flush=True); sys.exit(1)
 tg_send("⚙️ Python OK, загружаю библиотеки...")
 
 try:
@@ -37,13 +42,17 @@ except Exception as e:
 
 try:
     from preview import generate_preview
-    from generator import generate_keychain_3mf
+    from generator import generate_keychain_3mf, generate_logo_3mf
+    from image_to_svg import image_to_svg
+    import colors as C
+    import car_logos
     tg_send("⚙️ Модули OK — запускаю бота!")
 except Exception as e:
     tg_send(f"❌ Модули: {e}"); sys.exit(1)
 
 # ─────────────────────────────────────────────────────────────────────────────
 from pathlib import Path
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -52,12 +61,11 @@ OWNER_CHAT_ID = CHAT_ID
 WORK_DIR      = Path("/tmp/keychains")
 PREVIEW_DIR   = Path("/tmp/previews")
 
-# Только одна генерация 3D-модели одновременно — иначе не хватит памяти
+# Только одна тяжёлая генерация одновременно — иначе не хватит памяти
 GEN_LOCK = asyncio.Semaphore(1)
 
 
 def cleanup_temp(*paths):
-    """Удаляет временные файлы, чтобы диск не заполнялся."""
     for p in paths:
         try:
             if p and Path(p).exists():
@@ -67,7 +75,6 @@ def cleanup_temp(*paths):
 
 
 def cleanup_old_files(max_age_sec=600):
-    """Чистит файлы старше 10 минут во временных папках."""
     import time
     now = time.time()
     for folder in (WORK_DIR, PREVIEW_DIR):
@@ -78,14 +85,15 @@ def cleanup_old_files(max_age_sec=600):
         except Exception:
             pass
 
-# ── Состояния диалога ─────────────────────────────────────────────────────────
+
+# ── Состояния диалога ────────────────────────────────────────────────────────
 (LANG, TYPE,
  NAME, FONT, FONT_SIZE, TEXT_HEIGHT, BACK_HEIGHT, RING_SIZE,
  TEXT_COLOR, BACK_COLOR,
- LOGO_UPLOAD, CAR_BRAND,
- CONFIRM, CONTACT) = range(14)
+ LOGO_UPLOAD, CAR_BRAND, LOGO_SIZE,
+ CONFIRM, CONTACT) = range(15)
 
-# ── Переводы ──────────────────────────────────────────────────────────────────
+# ── Переводы ─────────────────────────────────────────────────────────────────
 T = {
     "ru": {
         "welcome": (
@@ -216,18 +224,17 @@ T = {
     },
 }
 
+
 def t(context, key):
     lang = context.user_data.get("lang", "ru")
     return T[lang].get(key, T["ru"].get(key, key))
 
-# ── Параметры ─────────────────────────────────────────────────────────────────
-# Шрифты с поддержкой кириллицы (русский / таджикский)
+
+# ── Шрифты ───────────────────────────────────────────────────────────────────
 FONTS_CYRILLIC = [
     "Pacifico", "Lobster", "Russo One", "Yeseva One",
     "Neucha", "Play", "Comfortaa", "Ruslan Display",
 ]
-
-# Шрифты только для латиницы
 FONTS_LATIN = [
     "Pacifico", "Lobster", "Cookie", "Dancing Script",
     "Satisfy", "Righteous", "Courgette", "Bangers",
@@ -235,114 +242,151 @@ FONTS_LATIN = [
 
 
 def has_cyrillic(text: str) -> bool:
-    """True если в тексте есть кириллические символы."""
     return any("\u0400" <= ch <= "\u04FF" for ch in text)
 
 
 def fonts_for(text: str):
-    """Возвращает список шрифтов, подходящих для данного текста."""
     return FONTS_CYRILLIC if has_cyrillic(text) else FONTS_LATIN
 
-FONT_SIZES   = ["10", "12", "14", "16", "18", "20"]   # мм
-TEXT_HEIGHTS = ["1", "2", "3"]                          # мм
-BACK_HEIGHTS = ["2", "3", "4", "5"]                     # мм
-RING_SIZES   = ["3", "4", "5", "6"]                     # мм диаметр
 
-COLORS = {
-    "Розовый 🩷 / Pink":      "Pink",
-    "Голубой 💙 / Blue":      "Turquoise",
-    "Фиолетовый 💜 / Purple": "Purple",
-    "Красный ❤️ / Red":       "Red",
-    "Зелёный 💚 / Green":     "Green",
-    "Жёлтый 💛 / Yellow":     "Yellow",
-    "Оранжевый 🧡 / Orange":  "Orange",
-    "Белый ⬜ / White":        "White",
-}
-BACK_COLORS = {
-    "Чёрный ⬛ / Black": "Black",
-    "Белый ⬜ / White":   "White",
-    "Серый 🔘 / Gray":    "Gray",
-}
+# ── Параметры ────────────────────────────────────────────────────────────────
+FONT_SIZES   = ["10", "12", "14", "16", "18", "20"]
+TEXT_HEIGHTS = ["1", "2", "3"]
+BACK_HEIGHTS = ["2", "3", "4", "5"]
+RING_SIZES   = ["3", "4", "5", "6"]
+LOGO_SIZES   = ["20", "25", "30", "35", "40", "50"]
 
-CAR_BRANDS = [
-    "BMW 🔵", "Mercedes-Benz ⭐", "Toyota 🔴", "Honda 🔴",
-    "Audi 🔵", "Volkswagen 🔵", "Ford 🔵", "Nissan 🔴",
-    "Hyundai 🔵", "Kia 🔴", "Lexus 🔷", "Porsche 🟡",
-    "Ferrari 🐎", "Lamborghini 🐂", "Chevrolet 🟡", "Subaru ⭐",
-    "Mazda 🔴", "Mitsubishi ♦️",
-]
+COLORS_PER_PAGE = 12
+CARS_PER_PAGE   = 12
 
-# ── Вспомогательные функции ───────────────────────────────────────────────────
+AVAILABLE_CARS = car_logos.load_available()
+if not AVAILABLE_CARS:
+    AVAILABLE_CARS = list(car_logos.CAR_BRANDS)
+
+
+# ── Клавиатуры ───────────────────────────────────────────────────────────────
 def kb(items, cols=2):
     buttons = [InlineKeyboardButton(txt, callback_data=txt) for txt in items]
-    rows = [buttons[i:i+cols] for i in range(0, len(buttons), cols)]
+    rows = [buttons[i:i + cols] for i in range(0, len(buttons), cols)]
     return InlineKeyboardMarkup(rows)
+
 
 def kb_data(pairs, cols=2):
-    """pairs = [(label, callback_data), ...]"""
     buttons = [InlineKeyboardButton(lbl, callback_data=dat) for lbl, dat in pairs]
-    rows = [buttons[i:i+cols] for i in range(0, len(buttons), cols)]
+    rows = [buttons[i:i + cols] for i in range(0, len(buttons), cols)]
     return InlineKeyboardMarkup(rows)
 
-# ── /start → выбор языка ──────────────────────────────────────────────────────
+
+def paged_kb(items, page, per_page, prefix, cols=2):
+    """items = [(подпись, значение), ...] + кнопки листания."""
+    total = max(1, (len(items) + per_page - 1) // per_page)
+    page  = max(0, min(page, total - 1))
+    chunk = items[page * per_page:(page + 1) * per_page]
+
+    buttons = [InlineKeyboardButton(lbl, callback_data=f"{prefix}:{val}")
+               for lbl, val in chunk]
+    rows = [buttons[i:i + cols] for i in range(0, len(buttons), cols)]
+
+    if total > 1:
+        rows.append([
+            InlineKeyboardButton("◀️", callback_data=f"{prefix}page:{(page - 1) % total}"),
+            InlineKeyboardButton(f"{page + 1}/{total}", callback_data="noop"),
+            InlineKeyboardButton("▶️", callback_data=f"{prefix}page:{(page + 1) % total}"),
+        ])
+    return InlineKeyboardMarkup(rows)
+
+
+def color_items():
+    return [(lbl, lbl) for lbl in C.labels()]
+
+
+def car_items():
+    return [(name, slug) for name, slug in AVAILABLE_CARS]
+
+
+def parse_cb(data: str, prefix: str):
+    """Разбирает callback_data. Возвращает ('page', N) | ('value', X) | ('noop', None)."""
+    data = data or ""
+    if data == "noop":
+        return "noop", None
+    if data.startswith(f"{prefix}page:"):
+        try:
+            return "page", int(data.split(":", 1)[1])
+        except ValueError:
+            return "page", 0
+    if data.startswith(f"{prefix}:"):
+        return "value", data.split(":", 1)[1]
+    return "value", data
+
+
+LANG_KB = InlineKeyboardMarkup([[
+    InlineKeyboardButton("🇷🇺 Русский", callback_data="ru"),
+    InlineKeyboardButton("🇹🇯 Тоҷикӣ",  callback_data="tj"),
+    InlineKeyboardButton("🇬🇧 English", callback_data="en"),
+]])
+LANG_PROMPT = "🌍 Выберите язык / Забонро интихоб кунед / Choose language:"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  СТАРТ И ВЫБОР ЯЗЫКА
+# ═════════════════════════════════════════════════════════════════════════════
+
 async def start(update: Update, context):
     context.user_data.clear()
-    lang_kb = InlineKeyboardMarkup([[
-        InlineKeyboardButton("🇷🇺 Русский",  callback_data="ru"),
-        InlineKeyboardButton("🇹🇯 Тоҷикӣ",  callback_data="tj"),
-        InlineKeyboardButton("🇬🇧 English",  callback_data="en"),
-    ]])
-    await update.message.reply_text(
-        "🌍 Выберите язык / Забонро интихоб кунед / Choose language:",
-        reply_markup=lang_kb,
-    )
+    await update.message.reply_text(LANG_PROMPT, reply_markup=LANG_KB)
     return LANG
 
-# ── Язык выбран ───────────────────────────────────────────────────────────────
+
 async def get_lang(update: Update, context):
-    q = update.callback_query; await q.answer()
-    context.user_data["lang"] = q.data
+    q = update.callback_query
+    await q.answer()
+    context.user_data["lang"] = q.data if q.data in T else "ru"
 
     type_kb = InlineKeyboardMarkup([
         [InlineKeyboardButton(t(context, "type_named"), callback_data="named")],
         [InlineKeyboardButton(t(context, "type_logo"),  callback_data="logo")],
         [InlineKeyboardButton(t(context, "type_car"),   callback_data="car")],
     ])
-    await q.edit_message_text(t(context, "welcome"), reply_markup=type_kb, parse_mode="Markdown")
+    await q.edit_message_text(t(context, "welcome"), reply_markup=type_kb)
     return TYPE
 
-# ── Тип брелока выбран ────────────────────────────────────────────────────────
+
 async def get_type(update: Update, context):
-    q = update.callback_query; await q.answer()
+    q = update.callback_query
+    await q.answer()
     context.user_data["type"] = q.data
 
     if q.data == "named":
         await q.edit_message_text(t(context, "enter_name"), parse_mode="Markdown")
         return NAME
-    elif q.data == "logo":
+    if q.data == "logo":
         await q.edit_message_text(t(context, "upload_logo"))
         return LOGO_UPLOAD
-    else:  # car
-        await q.edit_message_text(t(context, "choose_car"), reply_markup=kb(CAR_BRANDS, cols=2))
-        return CAR_BRAND
+    await q.edit_message_text(
+        t(context, "choose_car"),
+        reply_markup=paged_kb(car_items(), 0, CARS_PER_PAGE, "car", cols=2),
+    )
+    return CAR_BRAND
 
-# ═══════════════════════════════════════════════════════════════════════════════
+
+# ═════════════════════════════════════════════════════════════════════════════
 #  ВЕТКА 1: ИМЕННОЙ БРЕЛОК
-# ═══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
 
 async def get_name(update: Update, context):
     name = update.message.text.strip()
     if not name or len(name) > 15:
         await update.message.reply_text(t(context, "name_too_long"))
         return NAME
-    context.user_data["name"] = name
 
+    context.user_data["name"] = name
     available = fonts_for(name)
+
     note = ""
     if has_cyrillic(name):
         note = {
             "ru": "\n\n_Показаны шрифты с поддержкой кириллицы_",
-            "tj": "\n\n_Хатҳои дорои дастгирии кириллица нишон дода шудаанд_",
+            "tj": "\n\n_Хатҳои дорои дастгирии кириллица_",
             "en": "\n\n_Showing fonts that support Cyrillic_",
         }.get(context.user_data.get("lang", "ru"), "")
 
@@ -353,23 +397,26 @@ async def get_name(update: Update, context):
     )
     return FONT
 
+
 async def get_font(update: Update, context):
-    q = update.callback_query; await q.answer()
-    if q.data in FONTS_CYRILLIC or q.data in FONTS_LATIN:
-        context.user_data["font"] = q.data
-    else:
-        context.user_data["font"] = "Pacifico"
+    q = update.callback_query
+    await q.answer()
+    context.user_data["font"] = (
+        q.data if q.data in FONTS_CYRILLIC or q.data in FONTS_LATIN else "Pacifico"
+    )
     await q.edit_message_text(
         t(context, "choose_font_size"),
         reply_markup=kb_data([(f"{s} мм", s) for s in FONT_SIZES], cols=3),
     )
     return FONT_SIZE
 
+
 async def get_font_size(update: Update, context):
-    q = update.callback_query; await q.answer()
+    q = update.callback_query
+    await q.answer()
     try:
         context.user_data["font_size"] = int(q.data)
-    except ValueError:
+    except (TypeError, ValueError):
         context.user_data["font_size"] = 16
     await q.edit_message_text(
         t(context, "choose_text_height"),
@@ -378,11 +425,13 @@ async def get_font_size(update: Update, context):
     )
     return TEXT_HEIGHT
 
+
 async def get_text_height(update: Update, context):
-    q = update.callback_query; await q.answer()
+    q = update.callback_query
+    await q.answer()
     try:
         context.user_data["text_height"] = float(q.data)
-    except ValueError:
+    except (TypeError, ValueError):
         context.user_data["text_height"] = 2.0
     await q.edit_message_text(
         t(context, "choose_back_height"),
@@ -391,11 +440,13 @@ async def get_text_height(update: Update, context):
     )
     return BACK_HEIGHT
 
+
 async def get_back_height(update: Update, context):
-    q = update.callback_query; await q.answer()
+    q = update.callback_query
+    await q.answer()
     try:
         context.user_data["back_height"] = float(q.data)
-    except ValueError:
+    except (TypeError, ValueError):
         context.user_data["back_height"] = 3.0
     await q.edit_message_text(
         t(context, "choose_ring"),
@@ -403,75 +454,214 @@ async def get_back_height(update: Update, context):
     )
     return RING_SIZE
 
+
 async def get_ring_size(update: Update, context):
-    q = update.callback_query; await q.answer()
+    q = update.callback_query
+    await q.answer()
     try:
         context.user_data["ring_size"] = float(q.data)
-    except ValueError:
+    except (TypeError, ValueError):
         context.user_data["ring_size"] = 4.0
     await q.edit_message_text(
         t(context, "choose_text_color"),
-        reply_markup=kb(list(COLORS.keys()), cols=2),
+        reply_markup=paged_kb(color_items(), 0, COLORS_PER_PAGE, "tc", cols=2),
     )
     return TEXT_COLOR
 
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  ВЕТКА 2: ЛОГОТИП КЛИЕНТА
+# ═════════════════════════════════════════════════════════════════════════════
+
+async def get_logo(update: Update, context):
+    if not update.message.photo:
+        await update.message.reply_text(t(context, "upload_logo"))
+        return LOGO_UPLOAD
+
+    photo = update.message.photo[-1]
+    file  = await context.bot.get_file(photo.file_id)
+    uid   = update.effective_user.id
+    logo_path = f"/tmp/logo_{uid}.jpg"
+    svg_path  = f"/tmp/logo_{uid}.svg"
+    await file.download_to_drive(logo_path)
+
+    d = context.user_data
+    d["logo_path"] = logo_path
+    d["name"] = "Логотип"
+
+    msg = await update.message.reply_text("⏳ Обрабатываю изображение...")
+
+    try:
+        loop = asyncio.get_running_loop()
+        async with GEN_LOCK:
+            await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, functools.partial(image_to_svg, logo_path, svg_path)
+                ),
+                timeout=60,
+            )
+        d["svg_path"] = svg_path
+        note = "✅ Логотип распознан!\n\n"
+    except Exception as e:
+        logger.error(f"Vectorize error: {e}")
+        d["svg_path"] = None
+        note = (f"⚠️ Не удалось перевести картинку в 3D:\n_{str(e)[:150]}_\n\n"
+                "Заказ оформим — модель сделаем вручную.\n\n")
+
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    await update.message.reply_text(
+        note + "📐 Выберите размер логотипа (мм):",
+        parse_mode="Markdown",
+        reply_markup=kb_data([(f"{s} мм", s) for s in LOGO_SIZES], cols=3),
+    )
+    return LOGO_SIZE
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  ВЕТКА 3: ЭМБЛЕМА АВТО
+# ═════════════════════════════════════════════════════════════════════════════
+
+async def get_car_brand(update: Update, context):
+    q = update.callback_query
+    await q.answer()
+    kind, val = parse_cb(q.data, "car")
+
+    if kind == "noop":
+        return CAR_BRAND
+    if kind == "page":
+        await q.edit_message_text(
+            t(context, "choose_car"),
+            reply_markup=paged_kb(car_items(), val, CARS_PER_PAGE, "car", cols=2),
+        )
+        return CAR_BRAND
+
+    slug = val
+    brand = next((n for n, sl in AVAILABLE_CARS if sl == slug), slug)
+
+    d = context.user_data
+    d["car_brand"] = brand
+    d["car_slug"]  = slug
+    d["svg_path"]  = car_logos.slug_to_file(slug)
+    d["name"]      = brand
+
+    await q.edit_message_text(
+        f"🚗 *{brand}*\n\n📐 Выберите размер эмблемы (мм):",
+        parse_mode="Markdown",
+        reply_markup=kb_data([(f"{s} мм", s) for s in LOGO_SIZES], cols=3),
+    )
+    return LOGO_SIZE
+
+
+async def get_logo_size(update: Update, context):
+    """Общий шаг для логотипа и эмблемы авто."""
+    q = update.callback_query
+    await q.answer()
+    try:
+        context.user_data["logo_size"] = float(q.data)
+    except (TypeError, ValueError):
+        context.user_data["logo_size"] = 30.0
+
+    await q.edit_message_text(
+        t(context, "choose_text_height"),
+        parse_mode="Markdown",
+        reply_markup=kb_data([(f"{h} мм", h) for h in TEXT_HEIGHTS], cols=3),
+    )
+    return TEXT_HEIGHT
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  ЦВЕТА (общий шаг для всех типов)
+# ═════════════════════════════════════════════════════════════════════════════
+
 async def get_text_color(update: Update, context):
-    q = update.callback_query; await q.answer()
-    context.user_data["text_color_label"] = q.data
-    context.user_data["text_color"] = COLORS.get(q.data, "Pink")
+    q = update.callback_query
+    await q.answer()
+    kind, val = parse_cb(q.data, "tc")
+
+    if kind == "noop":
+        return TEXT_COLOR
+    if kind == "page":
+        await q.edit_message_text(
+            t(context, "choose_text_color"),
+            reply_markup=paged_kb(color_items(), val, COLORS_PER_PAGE, "tc", cols=2),
+        )
+        return TEXT_COLOR
+
+    context.user_data["text_color_label"] = val
+    context.user_data["text_color"] = C.color_name(val, "Pink")
+
     await q.edit_message_text(
         t(context, "choose_back_color"),
-        reply_markup=kb(list(BACK_COLORS.keys()), cols=2),
+        reply_markup=paged_kb(color_items(), 0, COLORS_PER_PAGE, "bc", cols=2),
     )
     return BACK_COLOR
+
 
 async def get_back_color(update: Update, context):
     q = update.callback_query
     await q.answer()
+    kind, val = parse_cb(q.data, "bc")
+
+    if kind == "noop":
+        return BACK_COLOR
+    if kind == "page":
+        await q.edit_message_text(
+            t(context, "choose_back_color"),
+            reply_markup=paged_kb(color_items(), val, COLORS_PER_PAGE, "bc", cols=2),
+        )
+        return BACK_COLOR
 
     d = context.user_data
-    d["back_color_label"] = q.data
-    d["back_color"] = BACK_COLORS.get(q.data, "Black")
+    d["back_color_label"] = val
+    d["back_color"] = C.color_name(val, "Black")
 
-    # ── Значения по умолчанию, чтобы никогда не было KeyError ───────────────
+    # Значения по умолчанию — чтобы нигде не было KeyError
     d.setdefault("name", "Keychain")
     d.setdefault("font", "Pacifico")
     d.setdefault("font_size", 16)
+    d.setdefault("logo_size", 30.0)
     d.setdefault("text_height", 2.0)
     d.setdefault("back_height", 3.0)
     d.setdefault("ring_size", 4.0)
     d.setdefault("text_color", "Pink")
-    d.setdefault("text_color_label", "Розовый 🩷 / Pink")
+    d.setdefault("text_color_label", "🩷 Розовый")
 
     await q.edit_message_text(t(context, "generating_preview"))
 
     lang       = d.get("lang", "ru")
     order_type = d.get("type", "named")
 
-    # ── Собираем описание заказа ────────────────────────────────────────────
+    common = (
+        f"📐 {T[lang]['text_h_lbl']}: *{d['text_height']} мм*\n"
+        f"🧱 {T[lang]['back_h_lbl']}: *{d['back_height']} мм*\n"
+        f"🔘 {T[lang]['ring_lbl']}: *⌀{d['ring_size']} мм*\n"
+        f"🎨 {T[lang]['text_c_lbl']}: *{d['text_color_label']}*\n"
+        f"🖤 {T[lang]['back_c_lbl']}: *{d['back_color_label']}*"
+    )
+
     if order_type == "named":
         caption = (
             f"{T[lang]['your_keychain']}\n\n"
             f"{T[lang]['name_lbl']}: *{d['name']}*\n"
             f"{T[lang]['font_lbl']}: *{d['font']}*\n"
-            f"{T[lang]['size_lbl']}: *{d['font_size']} мм*\n"
-            f"{T[lang]['text_h_lbl']}: *{d['text_height']} мм*\n"
-            f"{T[lang]['back_h_lbl']}: *{d['back_height']} мм*\n"
-            f"{T[lang]['ring_lbl']}: *⌀{d['ring_size']} мм*\n"
-            f"{T[lang]['text_c_lbl']}: *{d['text_color_label']}*\n"
-            f"{T[lang]['back_c_lbl']}: *{d['back_color_label']}*"
+            f"{T[lang]['size_lbl']}: *{d['font_size']} мм*\n" + common
         )
     elif order_type == "car":
         caption = (
             f"{T[lang]['your_keychain']}\n\n"
-            f"🚗 *{d.get('car_brand', '?')}*\n"
-            f"{T[lang]['back_c_lbl']}: *{d['back_color_label']}*"
+            f"🚗 Марка: *{d.get('car_brand', '?')}*\n"
+            f"📏 Размер эмблемы: *{d['logo_size']} мм*\n" + common
         )
-    else:  # logo
+    else:
+        mark = "✅" if d.get("svg_path") else "⚠️"
         caption = (
             f"{T[lang]['your_keychain']}\n\n"
-            f"🖼️ *Ваш логотип*\n"
-            f"{T[lang]['back_c_lbl']}: *{d['back_color_label']}*"
+            f"🖼️ Ваш логотип {mark}\n"
+            f"📏 Размер: *{d['logo_size']} мм*\n" + common
         )
 
     confirm_kb = InlineKeyboardMarkup([
@@ -481,7 +671,6 @@ async def get_back_color(update: Update, context):
 
     chat_id = q.message.chat_id
 
-    # ── Превью только для именного брелока ──────────────────────────────────
     preview_path = None
     if order_type == "named":
         try:
@@ -489,7 +678,6 @@ async def get_back_color(update: Update, context):
                 d["name"], d["font"], d["text_color"], d["back_color"]
             )
             if not preview_path or not Path(preview_path).exists():
-                logger.error(f"Preview file missing: {preview_path}")
                 preview_path = None
         except Exception as e:
             logger.error(f"Preview error: {e}")
@@ -504,108 +692,52 @@ async def get_back_color(update: Update, context):
         with open(preview_path, "rb") as f:
             await context.bot.send_photo(
                 chat_id=chat_id, photo=f, caption=caption,
-                parse_mode="Markdown", reply_markup=confirm_kb,
-            )
+                parse_mode="Markdown", reply_markup=confirm_kb)
     elif order_type == "logo" and d.get("logo_path") and Path(d["logo_path"]).exists():
         with open(d["logo_path"], "rb") as f:
             await context.bot.send_photo(
                 chat_id=chat_id, photo=f, caption=caption,
-                parse_mode="Markdown", reply_markup=confirm_kb,
-            )
+                parse_mode="Markdown", reply_markup=confirm_kb)
     else:
         await context.bot.send_message(
             chat_id=chat_id, text=caption,
-            parse_mode="Markdown", reply_markup=confirm_kb,
-        )
+            parse_mode="Markdown", reply_markup=confirm_kb)
+
     return CONFIRM
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ВЕТКА 2: БРЕЛОК С ЛОГОТИПОМ
-# ═══════════════════════════════════════════════════════════════════════════════
-
-async def get_logo(update: Update, context):
-    if not update.message.photo:
-        await update.message.reply_text(t(context, "upload_logo"))
-        return LOGO_UPLOAD
-    photo = update.message.photo[-1]
-    file  = await context.bot.get_file(photo.file_id)
-    logo_path = f"/tmp/logo_{update.effective_user.id}.jpg"
-    await file.download_to_drive(logo_path)
-    context.user_data["logo_path"] = logo_path
-    context.user_data["name"] = "Логотип"
-    context.user_data["font"] = "Pacifico"
-    context.user_data["font_size"] = 16
-    context.user_data["text_height"] = 2.0
-    context.user_data["back_height"] = 3.0
-    context.user_data["ring_size"] = 4.0
-    context.user_data["text_color"] = "White"
-    context.user_data["text_color_label"] = "Белый ⬜ / White"
-    await update.message.reply_text(
-        t(context, "choose_back_color"),
-        reply_markup=kb(list(BACK_COLORS.keys()), cols=2),
-    )
-    return BACK_COLOR
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ВЕТКА 3: БРЕЛОК С ЛОГОТИПОМ АВТО
-# ═══════════════════════════════════════════════════════════════════════════════
-
-async def get_car_brand(update: Update, context):
-    q = update.callback_query; await q.answer()
-    context.user_data["car_brand"] = q.data
-    context.user_data["name"] = q.data
-    context.user_data["font"] = "Pacifico"
-    context.user_data["font_size"] = 16
-    context.user_data["text_height"] = 2.0
-    context.user_data["back_height"] = 3.0
-    context.user_data["ring_size"] = 4.0
-    context.user_data["text_color"] = "White"
-    context.user_data["text_color_label"] = "Белый ⬜ / White"
-    await q.edit_message_text(
-        t(context, "choose_back_color"),
-        reply_markup=kb(list(BACK_COLORS.keys()), cols=2),
-    )
-    return BACK_COLOR
-
-# ═══════════════════════════════════════════════════════════════════════════════
-#  ПОДТВЕРЖДЕНИЕ И КОНТАКТ
-# ═══════════════════════════════════════════════════════════════════════════════
+# ═════════════════════════════════════════════════════════════════════════════
+#  ПОДТВЕРЖДЕНИЕ И ОФОРМЛЕНИЕ
+# ═════════════════════════════════════════════════════════════════════════════
 
 async def confirm(update: Update, context):
-    q = update.callback_query; await q.answer()
+    q = update.callback_query
+    await q.answer()
+
     if q.data == "restart":
-        await q.message.delete()
+        try:
+            await q.message.delete()
+        except Exception:
+            pass
         context.user_data.clear()
-        lang_kb = InlineKeyboardMarkup([[
-            InlineKeyboardButton("🇷🇺 Русский", callback_data="ru"),
-            InlineKeyboardButton("🇹🇯 Тоҷикӣ",  callback_data="tj"),
-            InlineKeyboardButton("🇬🇧 English",  callback_data="en"),
-        ]])
         await context.bot.send_message(
-            chat_id=q.message.chat_id,
-            text="🌍 Выберите язык / Забонро интихоб кунед / Choose language:",
-            reply_markup=lang_kb,
-        )
+            chat_id=q.message.chat_id, text=LANG_PROMPT, reply_markup=LANG_KB)
         return LANG
+
     try:
         if q.message.caption is not None:
             await q.edit_message_caption(
-                q.message.caption + "\n\n✅ Оформляем заказ!",
-                parse_mode="Markdown",
-            )
+                q.message.caption + "\n\n✅ Оформляем заказ!", parse_mode="Markdown")
         else:
             await q.edit_message_text(
-                (q.message.text or "") + "\n\n✅ Оформляем заказ!",
-                parse_mode="Markdown",
-            )
+                (q.message.text or "") + "\n\n✅ Оформляем заказ!", parse_mode="Markdown")
     except Exception:
         pass
+
     await context.bot.send_message(
-        chat_id=q.message.chat_id,
-        text=t(context, "enter_contact"),
-    )
+        chat_id=q.message.chat_id, text=t(context, "enter_contact"))
     return CONTACT
+
 
 async def get_contact(update: Update, context):
     contact = update.message.text.strip()
@@ -614,106 +746,122 @@ async def get_contact(update: Update, context):
 
     msg = await update.message.reply_text(t(context, "generating_file"))
 
-    # Определяем тип заказа
     order_type = d.get("type", "named")
-    keychain_type_label = {
-        "named": "🏷️ Именной",
-        "logo":  "🎨 Логотип",
-        "car":   "🚗 Авто",
-    }.get(order_type, "Именной")
+    type_label = {"named": "🏷️ Именной", "logo": "🎨 Логотип",
+                  "car": "🚗 Авто"}.get(order_type, "Именной")
 
-    file_3mf = None
-    error_note = ""
+    file_3mf, error_note = None, ""
+    cleanup_old_files()
+    work_dir = WORK_DIR / str(update.effective_user.id)
+    loop = asyncio.get_running_loop()
 
-    if order_type == "named":
-        try:
-            work_dir = WORK_DIR / str(update.effective_user.id)
-            cleanup_old_files()
-            loop = asyncio.get_running_loop()
+    try:
+        if order_type == "named":
             async with GEN_LOCK:
                 file_3mf = await asyncio.wait_for(
-                    loop.run_in_executor(
-                        None,
-                        functools.partial(
-                            generate_keychain_3mf,
-                            name=d["name"], font=d["font"],
-                            back_color=d.get("back_color", "Black"),
-                            text_color=d.get("text_color", "Pink"),
-                            work_dir=work_dir,
-                            font_size=d.get("font_size", 16),
-                            text_height=d.get("text_height", 2.0),
-                            back_height=d.get("back_height", 3.0),
-                            ring_radius=d.get("ring_size", 4.0) / 2,
-                        ),
-                    ),
-                    timeout=110,
-                )
-        except asyncio.TimeoutError:
-            logger.error("3MF generation timed out")
-            error_note = "\n⚠️ Генерация заняла слишком долго — сделайте файл вручную."
-        except Exception as e:
-            logger.error(f"3MF error: {e}")
-            error_note = f"\n⚠️ Файл не сгенерирован.\n<b>Причина:</b> {str(e)[:400]}"
+                    loop.run_in_executor(None, functools.partial(
+                        generate_keychain_3mf,
+                        name=d["name"], font=d["font"],
+                        back_color=d.get("back_color", "Black"),
+                        text_color=d.get("text_color", "Pink"),
+                        work_dir=work_dir,
+                        font_size=d.get("font_size", 16),
+                        text_height=d.get("text_height", 2.0),
+                        back_height=d.get("back_height", 3.0),
+                        ring_radius=d.get("ring_size", 4.0) / 2,
+                    )), timeout=110)
+
+        elif d.get("svg_path") and Path(d["svg_path"]).exists():
+            async with GEN_LOCK:
+                file_3mf = await asyncio.wait_for(
+                    loop.run_in_executor(None, functools.partial(
+                        generate_logo_3mf,
+                        svg_path=d["svg_path"],
+                        back_color=d.get("back_color", "Black"),
+                        text_color=d.get("text_color", "White"),
+                        work_dir=work_dir,
+                        name=d.get("name", "logo"),
+                        logo_size=d.get("logo_size", 30.0),
+                        text_height=d.get("text_height", 2.0),
+                        back_height=d.get("back_height", 3.0),
+                        ring_radius=d.get("ring_size", 4.0) / 2,
+                    )), timeout=140)
+        else:
+            error_note = "\n⚠️ Модель не создана — нет исходного контура."
+
+    except asyncio.TimeoutError:
+        logger.error("3MF timeout")
+        error_note = "\n⚠️ Генерация заняла слишком долго — сделайте файл вручную."
+    except Exception as e:
+        logger.error(f"3MF error: {e}")
+        error_note = f"\n⚠️ Файл не сгенерирован.\nПричина: {str(e)[:350]}"
 
     lang = d.get("lang", "ru")
-    order_lines = [
-        f"🆕 *НОВЫЙ ЗАКАЗ* — {keychain_type_label}{error_note}",
-        f"",
+    lines = [
+        f"🆕 *НОВЫЙ ЗАКАЗ* — {type_label}{error_note}",
+        "",
         f"👤 {update.effective_user.full_name}"
         + (f" (@{update.effective_user.username})" if update.effective_user.username else ""),
         f"📞 {contact}",
         f"🌍 Язык: {lang.upper()}",
-        f"",
+        "",
     ]
+
     if order_type == "named":
-        order_lines += [
+        lines += [
             f"📛 Имя: *{d.get('name','?')}*",
             f"🔤 Шрифт: {d.get('font','?')}",
-            f"📏 Размер: {d.get('font_size','?')} мм",
-            f"📐 Высота текста: {d.get('text_height','?')} мм",
-            f"🧱 Подложка: {d.get('back_height','?')} мм",
-            f"🔘 Отверстие: ⌀{d.get('ring_size','?')} мм",
-            f"🎨 Цвет текста: {d.get('text_color_label','?')}",
-            f"🖤 Цвет подложки: {d.get('back_color_label','?')}",
+            f"📏 Размер текста: {d.get('font_size','?')} мм",
         ]
-    elif order_type == "logo":
-        order_lines.append("🖼️ Клиент прислал логотип — см. фото выше")
     elif order_type == "car":
-        order_lines.append(f"🚗 Марка авто: {d.get('car_brand','?')}")
-        order_lines.append(f"🖤 Подложка: {d.get('back_color_label','?')}")
+        lines += [
+            f"🚗 Марка: *{d.get('car_brand','?')}*",
+            f"📏 Размер эмблемы: {d.get('logo_size','?')} мм",
+        ]
+    else:
+        lines += [
+            "🖼️ Логотип клиента — фото ниже",
+            f"📏 Размер: {d.get('logo_size','?')} мм",
+        ]
 
-    order_text = "\n".join(order_lines)
+    lines += [
+        f"📐 Высота рельефа: {d.get('text_height','?')} мм",
+        f"🧱 Подложка: {d.get('back_height','?')} мм",
+        f"🔘 Отверстие: ⌀{d.get('ring_size','?')} мм",
+        f"🎨 Цвет верха: {d.get('text_color_label','?')}",
+        f"🖤 Цвет подложки: {d.get('back_color_label','?')}",
+    ]
+
+    order_text = "\n".join(lines)
     try:
         await context.bot.send_message(OWNER_CHAT_ID, order_text, parse_mode="Markdown")
     except Exception:
-        # Спецсимволы в ошибке могут сломать Markdown — шлём как обычный текст
         import re as _re
-        plain = _re.sub(r"[*_`\[\]]", "", order_text)
-        await context.bot.send_message(OWNER_CHAT_ID, plain)
+        await context.bot.send_message(
+            OWNER_CHAT_ID, _re.sub(r"[*_`\[\]]", "", order_text))
 
-    # Если есть логотип — пересылаем владельцу
     if order_type == "logo" and d.get("logo_path") and Path(d["logo_path"]).exists():
         try:
             with open(d["logo_path"], "rb") as f:
-                await context.bot.send_photo(OWNER_CHAT_ID, photo=f, caption="🖼️ Логотип клиента")
-        except Exception: pass
+                await context.bot.send_photo(
+                    OWNER_CHAT_ID, photo=f, caption="🖼️ Логотип клиента")
+        except Exception:
+            pass
 
-    # Если есть 3MF — отправляем файл
     if file_3mf and Path(file_3mf).exists():
         with open(file_3mf, "rb") as f:
             await context.bot.send_document(
                 OWNER_CHAT_ID, document=f,
-                filename=f"{d['name']}_keychain.3mf",
-                caption=(f"🖨️ *{d['name']}* | {d.get('font','')}\n"
-                         f"AMS1=подложка ({d.get('back_color','')}) | "
-                         f"AMS2=текст ({d.get('text_color','')})"),
-                parse_mode="Markdown",
-            )
+                filename=f"{d.get('name','keychain')}_keychain.3mf",
+                caption=(f"🖨️ *{d.get('name','?')}*\n"
+                         f"AMS1 = подложка ({d.get('back_color','')})\n"
+                         f"AMS2 = верх ({d.get('text_color','')})"),
+                parse_mode="Markdown")
 
-    # Чистим временные файлы — иначе диск и память переполнятся
     cleanup_temp(file_3mf, d.get("logo_path"))
+    if d.get("svg_path") and "/tmp/logo_" in str(d.get("svg_path", "")):
+        cleanup_temp(d["svg_path"])
     try:
-        work_dir = WORK_DIR / str(update.effective_user.id)
         if work_dir.exists():
             for f in work_dir.glob("*"):
                 f.unlink(missing_ok=True)
@@ -728,73 +876,72 @@ async def get_contact(update: Update, context):
     context.user_data.clear()
     return ConversationHandler.END
 
+
 async def cancel(update: Update, context):
     await update.message.reply_text(t(context, "cancelled"))
+    context.user_data.clear()
     return ConversationHandler.END
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  СЛУЖЕБНОЕ
+# ═════════════════════════════════════════════════════════════════════════════
 
 _conflict_notified = False
 
-async def error_handler(update, context):
-    """Catches every unhandled error so the bot never crashes."""
-    global _conflict_notified
 
+async def error_handler(update, context):
+    global _conflict_notified
     err_text = str(context.error)
 
-    # ── Конфликт: работает второй экземпляр бота ────────────────────────────
     if "Conflict" in err_text or "terminated by other" in err_text:
         if not _conflict_notified:
             _conflict_notified = True
             try:
                 await context.bot.send_message(
                     OWNER_CHAT_ID,
-                    "🛑 *Обнаружен второй запущенный бот!*\n\n"
-                    "Два экземпляра конфликтуют за один токен.\n\n"
-                    "*Что сделать на Railway:*\n"
-                    "1. Откройте проект → посмотрите сколько сервисов на холсте\n"
-                    "2. Сервис → *Deployments* → оставьте только один ACTIVE\n"
-                    "3. Лишние: `⋮` → Remove\n\n"
-                    "_Этот бот сейчас остановится, чтобы не мешать._",
-                    parse_mode="Markdown",
-                )
+                    "🛑 Обнаружен второй запущенный экземпляр бота!\n\n"
+                    "На Railway оставьте только один ACTIVE-деплой.\n"
+                    "Этот экземпляр останавливается.")
             except Exception:
                 pass
-        # Останавливаем процесс — Railway перезапустит один экземпляр
-        logger.error("Conflict detected — shutting down this instance")
+        logger.error("Conflict — shutting down")
         os._exit(1)
 
     err = "".join(traceback.format_exception(
-        type(context.error), context.error, context.error.__traceback__))[-1500:]
-    logger.error(f"Unhandled error: {err}")
+        type(context.error), context.error, context.error.__traceback__))[-1200:]
+    logger.error(f"Unhandled: {err}")
     try:
         await context.bot.send_message(
             OWNER_CHAT_ID,
-            f"⚠️ Ошибка в боте (бот продолжает работать):\n\n<code>{err[-800:]}</code>",
-            parse_mode="HTML",
-        )
+            f"⚠️ Ошибка (бот работает дальше):\n\n<code>{err[-800:]}</code>",
+            parse_mode="HTML")
     except Exception:
         pass
-    # Tell the user something went wrong, but keep the bot alive
     try:
         if isinstance(update, Update) and update.effective_message:
             await update.effective_message.reply_text(
-                "⚠️ Произошла ошибка. Напишите /start чтобы начать заново."
-            )
+                "⚠️ Произошла ошибка. Напишите /start чтобы начать заново.")
     except Exception:
         pass
 
 
 async def periodic_cleanup(context):
-    """Раз в 5 минут удаляет старые временные файлы."""
     cleanup_old_files(max_age_sec=600)
 
 
 async def post_init(app):
     try:
-        await app.bot.send_message(chat_id=OWNER_CHAT_ID, text="🤖 Бот запущен и готов к работе!")
+        await app.bot.send_message(
+            chat_id=OWNER_CHAT_ID,
+            text=(f"🤖 Бот запущен!\n\n"
+                  f"🎨 Цветов: {len(C.labels())}\n"
+                  f"🚗 Марок авто: {len(AVAILABLE_CARS)}\n"
+                  f"🔤 Шрифтов: {len(set(FONTS_CYRILLIC) | set(FONTS_LATIN))}"))
     except Exception as e:
         print(f"post_init error: {e}", flush=True)
 
-# ── Main ──────────────────────────────────────────────────────────────────────
+
 def main():
     WORK_DIR.mkdir(parents=True, exist_ok=True)
     PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
@@ -811,7 +958,6 @@ def main():
         .build()
     )
 
-    # Фоновая очистка каждые 5 минут
     if app.job_queue:
         app.job_queue.run_repeating(periodic_cleanup, interval=300, first=300)
 
@@ -820,26 +966,24 @@ def main():
         states={
             LANG:        [CallbackQueryHandler(get_lang)],
             TYPE:        [CallbackQueryHandler(get_type)],
-            # Именной
             NAME:        [MessageHandler(filters.TEXT & ~filters.COMMAND, get_name)],
             FONT:        [CallbackQueryHandler(get_font)],
             FONT_SIZE:   [CallbackQueryHandler(get_font_size)],
+            LOGO_UPLOAD: [MessageHandler(filters.PHOTO, get_logo),
+                          MessageHandler(filters.TEXT & ~filters.COMMAND, get_logo)],
+            CAR_BRAND:   [CallbackQueryHandler(get_car_brand)],
+            LOGO_SIZE:   [CallbackQueryHandler(get_logo_size)],
             TEXT_HEIGHT: [CallbackQueryHandler(get_text_height)],
             BACK_HEIGHT: [CallbackQueryHandler(get_back_height)],
             RING_SIZE:   [CallbackQueryHandler(get_ring_size)],
             TEXT_COLOR:  [CallbackQueryHandler(get_text_color)],
             BACK_COLOR:  [CallbackQueryHandler(get_back_color)],
-            # Логотип
-            LOGO_UPLOAD: [MessageHandler(filters.PHOTO, get_logo),
-                          MessageHandler(filters.TEXT & ~filters.COMMAND, get_logo)],
-            # Авто
-            CAR_BRAND:   [CallbackQueryHandler(get_car_brand)],
-            # Финал
             CONFIRM:     [CallbackQueryHandler(confirm)],
             CONTACT:     [MessageHandler(filters.TEXT & ~filters.COMMAND, get_contact)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[CommandHandler("cancel", cancel), CommandHandler("start", start)],
     )
+
     app.add_handler(conv)
     app.add_error_handler(error_handler)
     print("=== POLLING STARTED ===", flush=True)
@@ -847,18 +991,13 @@ def main():
 
 
 if __name__ == "__main__":
-    # Запускаем один раз. При падении процесса Railway сам его перезапустит
-    # (restartPolicyType = ON_FAILURE в railway.toml) — это надёжнее чем
-    # перезапуск внутри процесса, где event loop уже закрыт.
     try:
         main()
     except Exception as e:
         msg = str(e)[:300]
         print(f"FATAL: {msg}", flush=True)
         if "Conflict" in msg or "terminated by other" in msg:
-            tg_send("⚠️ Обнаружен ВТОРОЙ запущенный экземпляр бота!\n\n"
-                    "Зайдите на Railway и удалите лишний проект/деплой — "
-                    "иначе боты будут конфликтовать.")
+            tg_send("⚠️ Обнаружен второй запущенный бот! Оставьте один деплой на Railway.")
         else:
             tg_send(f"❌ Бот остановлен: {msg}")
         sys.exit(1)
