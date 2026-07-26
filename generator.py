@@ -7,6 +7,25 @@ then packages them into a Bambu-compatible .3mf with AMS extruder assignments.
 import struct, subprocess, zipfile
 from pathlib import Path
 
+
+# Имя шрифта в боте -> имя семейства, которое понимает OpenSCAD/fontconfig
+FONT_FAMILY = {
+    "Pacifico":       "Pacifico",
+    "Lobster":        "Lobster",
+    "Russo One":      "Russo One",
+    "Yeseva One":     "Yeseva One",
+    "Neucha":         "Neucha",
+    "Play":           "Play:style=Bold",
+    "Comfortaa":      "Comfortaa:style=Bold",
+    "Ruslan Display": "Ruslan Display",
+    "Cookie":         "Cookie",
+    "Courgette":      "Courgette",
+    "Bangers":        "Bangers",
+    "Satisfy":        "Satisfy",
+    "Righteous":      "Righteous",
+    "Dancing Script": "Dancing Script:style=Bold",
+}
+
 # ── OpenSCAD template ─────────────────────────────────────────────────────────
 
 SCAD_TEMPLATE = """\
@@ -130,10 +149,24 @@ def build_3mf(back_stl, text_stl, back_color, text_color, output_path):
 def _render_stl(scad_text, out_stl, timeout=60):
     scad_file = Path(str(out_stl).replace(".stl", ".scad"))
     scad_file.write_text(scad_text, encoding="utf-8")
-    cmd = ["xvfb-run", "--auto-servernum", "openscad", "--render", "-o", str(out_stl), str(scad_file)]
+    cmd = ["xvfb-run", "--auto-servernum", "openscad",
+           "--render", "-o", str(out_stl), str(scad_file)]
     result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+
+    stderr = result.stderr.decode(errors="replace")
     if result.returncode != 0:
-        raise RuntimeError(f"OpenSCAD failed:\n{result.stderr.decode(errors='replace')}")
+        raise RuntimeError(f"OpenSCAD код {result.returncode}: {stderr[-500:]}")
+
+    out_path = Path(out_stl)
+    if not out_path.exists():
+        raise RuntimeError(f"STL не создан. OpenSCAD: {stderr[-500:]}")
+
+    size = out_path.stat().st_size
+    if size < 200:
+        raise RuntimeError(
+            "Пустая модель — шрифт не содержит нужных символов "
+            f"(STL {size} байт). OpenSCAD: {stderr[-300:]}"
+        )
 
 def generate_keychain_3mf(
     name: str,
@@ -154,7 +187,8 @@ def generate_keychain_3mf(
     text_stl = work_dir / f"{safe}_text.stl"
     out_3mf  = work_dir / f"{safe}_keychain.3mf"
 
-    params = dict(name=name, font=font, font_size=font_size,
+    family = FONT_FAMILY.get(font, font)
+    params = dict(name=name, font=family, font_size=font_size,
                   text_height=text_height, back_height=back_height,
                   ring_radius=ring_radius)
 
