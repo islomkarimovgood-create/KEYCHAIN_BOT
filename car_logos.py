@@ -76,6 +76,100 @@ RUNTIME_DIR = "/tmp/carlogos"
 LOGO_DIR    = BUILD_DIR
 
 
+
+# Запасные варианты имён в наборе иконок (у некоторых марок slug отличается)
+ALT_SLUGS = {
+    "lexus":           ["lexus", "lexusinternational"],
+    "genesis":         ["genesis", "genesismotor", "genesismotors"],
+    "ssangyong":       ["ssangyong", "ssangyongmotor", "kgmobility"],
+    "dodge":           ["dodge", "dodgeofficial"],
+    "gmc":             ["gmc", "generalmotors"],
+    "lincoln":         ["lincoln", "lincolnmotorcompany"],
+    "buick":           ["buick", "buickmotor"],
+    "lancia":          ["lancia", "lanciaofficial"],
+    "lotuscars":       ["lotuscars", "lotus", "grouplotus"],
+    "chery":           ["chery", "cheryauto", "cheryautomobile"],
+    "haval":           ["haval", "havalauto"],
+    "byd":             ["byd", "bydauto", "bydcompany"],
+    "geely":           ["geely", "geelyauto", "geelyautomobile"],
+    "greatwallmotors": ["greatwallmotors", "greatwall", "gwm"],
+    "uaz":             ["uaz", "uazofficial"],
+}
+
+# Второй источник: набор логотипов в PNG. Превращаем в контур через potrace.
+PNG_SOURCES = [
+    "https://raw.githubusercontent.com/filippofilip95/car-logos-dataset/master/logos/optimized/{slug}.png",
+    "https://raw.githubusercontent.com/filippofilip95/car-logos-dataset/master/logos/original/{slug}.png",
+]
+
+# Имена файлов во втором наборе отличаются от наших slug
+PNG_NAMES = {
+    "mercedes":        "mercedes-benz",
+    "volkswagen":      "volkswagen",
+    "alfaromeo":       "alfa-romeo",
+    "astonmartin":     "aston-martin",
+    "rollsroyce":      "rolls-royce",
+    "landrover":       "land-rover",
+    "lotuscars":       "lotus",
+    "greatwallmotors": "great-wall",
+    "dsautomobiles":   "ds",
+    "mini":            "mini",
+    "gmc":             "gmc",
+}
+
+
+def _png_name(slug: str) -> str:
+    return PNG_NAMES.get(slug, slug)
+
+
+def _png_to_svg(png_bytes: bytes, out_svg: str) -> bool:
+    """PNG -> контур SVG через potrace. True если получилось."""
+    import io, subprocess, os
+    try:
+        from PIL import Image, ImageOps
+    except Exception:
+        return False
+
+    try:
+        img = Image.open(io.BytesIO(png_bytes))
+
+        # Прозрачный фон делаем белым
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGBA")
+            bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
+            img = Image.alpha_composite(bg, img)
+
+        img = img.convert("L")
+        if max(img.size) > 700:
+            k = 700 / max(img.size)
+            img = img.resize((int(img.width * k), int(img.height * k)), Image.LANCZOS)
+
+        img = ImageOps.autocontrast(img)
+        bw = img.point(lambda v: 255 if v > 140 else 0, mode="1")
+
+        # Проверяем, что рисунок не пустой
+        px = list(bw.getdata())
+        ratio = sum(1 for v in px if v == 0) / max(1, len(px))
+        if ratio < 0.01 or ratio > 0.95:
+            return False
+
+        pbm = out_svg.replace(".svg", ".pbm")
+        bw.save(pbm)
+        r = subprocess.run(
+            ["potrace", pbm, "-s", "-o", out_svg,
+             "--turdsize", "3", "--alphamax", "1.0"],
+            capture_output=True, timeout=60,
+        )
+        try:
+            os.remove(pbm)
+        except Exception:
+            pass
+
+        return r.returncode == 0 and os.path.exists(out_svg) and os.path.getsize(out_svg) > 200
+    except Exception:
+        return False
+
+
 def _writable_dir():
     """Возвращает папку, в которую реально можно писать."""
     for d in (BUILD_DIR, RUNTIME_DIR):
@@ -136,6 +230,7 @@ def download_all():
     headers = {"User-Agent": "Mozilla/5.0 (compatible; logo-fetch/1.0)"}
 
     ok, fail, failed_names = 0, 0, []
+
     for name, slug in CAR_BRANDS:
         # Уже скачано раньше — пропускаем
         existing = slug_to_file(slug)
@@ -145,29 +240,54 @@ def download_all():
 
         target = os.path.join(target_dir, f"{slug}.svg")
         got = False
-        for base in bases:
-            url = base.format(slug=slug)
-            try:
-                req = urllib.request.Request(url, headers=headers)
-                with urllib.request.urlopen(req, timeout=25) as r:
-                    data = r.read()
-                if len(data) < 100 or b"<svg" not in data[:400]:
+
+        # ── Источник 1: векторные иконки (пробуем все варианты имени) ──────
+        for candidate in ALT_SLUGS.get(slug, [slug]):
+            for base in bases:
+                url = base.format(slug=candidate)
+                try:
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=25) as r:
+                        data = r.read()
+                    if len(data) < 100 or b"<svg" not in data[:400]:
+                        continue
+                    with open(target, "wb") as f:
+                        f.write(data)
+                    print(f"  OK   {name:16s} SVG ({len(data)} B)", flush=True)
+                    ok += 1
+                    got = True
+                    time.sleep(0.15)
+                    break
+                except Exception:
                     continue
-                with open(target, "wb") as f:
-                    f.write(data)
-                print(f"  OK   {name:16s} ({len(data)} B)", flush=True)
-                ok += 1
-                got = True
-                time.sleep(0.15)
+            if got:
                 break
-            except Exception:
-                continue
+
+        # ── Источник 2: растровые логотипы -> контур через potrace ─────────
+        if not got:
+            png_slug = _png_name(slug)
+            for base in PNG_SOURCES:
+                url = base.format(slug=png_slug)
+                try:
+                    req = urllib.request.Request(url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=30) as r:
+                        png = r.read()
+                    if len(png) < 500:
+                        continue
+                    if _png_to_svg(png, target):
+                        print(f"  OK   {name:16s} PNG->SVG ({len(png)} B)", flush=True)
+                        ok += 1
+                        got = True
+                        time.sleep(0.15)
+                        break
+                except Exception:
+                    continue
+
         if not got:
             print(f"  SKIP {name}", flush=True)
             fail += 1
             failed_names.append(slug)
 
-    # Сохраняем список успешно скачанных — бот покажет только их
     with open(os.path.join(target_dir, "available.txt"), "w", encoding="utf-8") as f:
         for name, slug in CAR_BRANDS:
             if slug not in failed_names:
