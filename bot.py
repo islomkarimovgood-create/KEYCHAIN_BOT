@@ -287,6 +287,15 @@ if not AVAILABLE_CARS:
     AVAILABLE_CARS = list(car_logos.CAR_BRANDS)
 
 
+def refresh_cars():
+    """Перечитывает список марок после докачки эмблем."""
+    global AVAILABLE_CARS
+    found = car_logos.load_available()
+    if found:
+        AVAILABLE_CARS = found
+    return len(AVAILABLE_CARS)
+
+
 # ── Клавиатуры ───────────────────────────────────────────────────────────────
 def kb(items, cols=2):
     buttons = [InlineKeyboardButton(txt, callback_data=txt) for txt in items]
@@ -324,7 +333,11 @@ def color_items():
 
 
 def car_items():
-    return [(name, slug) for name, slug in AVAILABLE_CARS]
+    """Только марки, чья эмблема реально скачана."""
+    have = set(car_logos.downloaded_slugs())
+    if have:
+        return [(n, sl) for n, sl in car_logos.CAR_BRANDS if sl in have]
+    return [(n, sl) for n, sl in AVAILABLE_CARS]
 
 
 def parse_cb(data: str, prefix: str):
@@ -386,9 +399,17 @@ async def get_type(update: Update, context):
     if q.data == "logo":
         await q.edit_message_text(t(context, "upload_logo"))
         return LOGO_UPLOAD
+    items = car_items()
+    if not items:
+        await q.edit_message_text(
+            "⚠️ Эмблемы автомарок пока не загружены на сервер.\n\n"
+            "Напишите /logos чтобы их скачать, затем /start."
+        )
+        return ConversationHandler.END
+
     await q.edit_message_text(
         t(context, "choose_car"),
-        reply_markup=paged_kb(car_items(), 0, CARS_PER_PAGE, "car", cols=2),
+        reply_markup=paged_kb(items, 0, CARS_PER_PAGE, "car", cols=2),
     )
     return CAR_BRAND
 
@@ -811,27 +832,12 @@ async def get_contact(update: Update, context):
                         ring_radius=d.get("ring_size", 4.0) / 2,
                     )), timeout=140)
 
-        elif order_type == "car":
-            # Эмблемы нет — делаем брелок с названием марки текстом
-            brand = d.get("car_brand", "Car")
-            async with GEN_LOCK:
-                file_3mf = await asyncio.wait_for(
-                    loop.run_in_executor(None, functools.partial(
-                        generate_keychain_3mf,
-                        name=brand,
-                        font="Russo One" if has_cyrillic(brand) else "Righteous",
-                        back_color=d.get("back_color", "Black"),
-                        text_color=d.get("text_color", "White"),
-                        work_dir=work_dir,
-                        font_size=max(10, min(20, int(d.get("logo_size", 30) * 0.5))),
-                        text_height=d.get("text_height", 2.0),
-                        back_height=d.get("back_height", 3.0),
-                        ring_radius=d.get("ring_size", 4.0) / 2,
-                    )), timeout=110)
-            error_note = "\nℹ️ Эмблема недоступна — сделан текстовый вариант."
-
         else:
-            error_note = "\n⚠️ Модель не создана — нет исходного контура."
+            if order_type == "car":
+                error_note = ("\n⚠️ Эмблема не скачана на сервер.\n"
+                              "Напишите /logos чтобы докачать эмблемы.")
+            else:
+                error_note = "\n⚠️ Модель не создана — нет исходного контура."
 
     except asyncio.TimeoutError:
         logger.error("3MF timeout")
@@ -1026,7 +1032,60 @@ async def periodic_cleanup(context):
     cleanup_old_files(max_age_sec=600)
 
 
+async def ensure_logos(app=None):
+    """Докачивает недостающие эмблемы. Запускается при старте бота."""
+    have = car_logos.count_downloaded()
+    total = len(car_logos.CAR_BRANDS)
+    if have >= total:
+        refresh_cars()
+        return have, total
+
+    print(f"Эмблем {have}/{total} — докачиваю...", flush=True)
+    try:
+        loop = asyncio.get_running_loop()
+        await asyncio.wait_for(
+            loop.run_in_executor(None, car_logos.download_all),
+            timeout=300,
+        )
+    except Exception as e:
+        print(f"Докачка эмблем: {e}", flush=True)
+
+    have = car_logos.count_downloaded()
+    refresh_cars()
+    return have, total
+
+
+async def logos_cmd(update: Update, context):
+    """/logos — принудительно докачать эмблемы."""
+    msg = await update.message.reply_text("⏳ Докачиваю эмблемы, подождите...")
+    have, total = await ensure_logos()
+    slugs = car_logos.downloaded_slugs()
+    missing = [sl for _, sl in car_logos.CAR_BRANDS if sl not in slugs]
+
+    text = [f"🚗 *Эмблемы: {have} из {total}*", ""]
+    if missing:
+        text.append("Не удалось скачать:")
+        text.append(", ".join(missing[:40]))
+        if len(missing) > 40:
+            text.append(f"...и ещё {len(missing) - 40}")
+    else:
+        text.append("✅ Все эмблемы на месте!")
+
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+    await update.message.reply_text("\n".join(text), parse_mode="Markdown")
+
+
 async def post_init(app):
+    # Докачиваем эмблемы, если при сборке что-то не загрузилось
+    try:
+        have, total = await ensure_logos(app)
+        print(f"Эмблемы готовы: {have}/{total}", flush=True)
+    except Exception as e:
+        print(f"ensure_logos: {e}", flush=True)
+
     # Меню команд — видно по кнопке «/» в чате
     try:
         from telegram import BotCommand
@@ -1067,9 +1126,10 @@ async def post_init(app):
             chat_id=OWNER_CHAT_ID,
             text=(f"🤖 Бот запущен!\n\n"
                   f"🎨 Цветов: {len(C.labels())}\n"
-                  f"🚗 Марок авто: {len(AVAILABLE_CARS)}\n"
+                  f"🚗 Эмблем авто: {car_logos.count_downloaded()}/{len(car_logos.CAR_BRANDS)}\n"
                   f"🔤 Шрифтов: {len(set(FONTS_CYRILLIC) | set(FONTS_LATIN))}\n\n"
-                  f"/diag — проверить что установлено на сервере"))
+                  f"/diag — что стоит на сервере\n"
+                  f"/logos — докачать эмблемы"))
     except Exception as e:
         print(f"post_init error: {e}", flush=True)
 
@@ -1118,6 +1178,7 @@ def main():
 
     app.add_handler(conv)
     app.add_handler(CommandHandler("diag", diag))
+    app.add_handler(CommandHandler("logos", logos_cmd))
     app.add_error_handler(error_handler)
     print("=== POLLING STARTED ===", flush=True)
     app.run_polling(drop_pending_updates=True)
