@@ -10,7 +10,7 @@ from pathlib import Path
 # ── OpenSCAD template ─────────────────────────────────────────────────────────
 
 SCAD_TEMPLATE = """\
-$fn = 100;
+$fn = 24;
 
 name_text  = "{name}";
 font_name  = "{font}";
@@ -127,10 +127,10 @@ def build_3mf(back_stl, text_stl, back_color, text_color, output_path):
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def _render_stl(scad_text, out_stl, timeout=120):
+def _render_stl(scad_text, out_stl, timeout=60):
     scad_file = Path(str(out_stl).replace(".stl", ".scad"))
     scad_file.write_text(scad_text, encoding="utf-8")
-    cmd = ["xvfb-run", "--auto-servernum", "openscad", "-o", str(out_stl), str(scad_file)]
+    cmd = ["xvfb-run", "--auto-servernum", "openscad", "--render", "-o", str(out_stl), str(scad_file)]
     result = subprocess.run(cmd, capture_output=True, timeout=timeout)
     if result.returncode != 0:
         raise RuntimeError(f"OpenSCAD failed:\n{result.stderr.decode(errors='replace')}")
