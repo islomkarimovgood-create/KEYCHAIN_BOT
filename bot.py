@@ -786,6 +786,26 @@ async def get_contact(update: Update, context):
                         back_height=d.get("back_height", 3.0),
                         ring_radius=d.get("ring_size", 4.0) / 2,
                     )), timeout=140)
+
+        elif order_type == "car":
+            # Эмблемы нет — делаем брелок с названием марки текстом
+            brand = d.get("car_brand", "Car")
+            async with GEN_LOCK:
+                file_3mf = await asyncio.wait_for(
+                    loop.run_in_executor(None, functools.partial(
+                        generate_keychain_3mf,
+                        name=brand,
+                        font="Russo One" if has_cyrillic(brand) else "Righteous",
+                        back_color=d.get("back_color", "Black"),
+                        text_color=d.get("text_color", "White"),
+                        work_dir=work_dir,
+                        font_size=max(10, min(20, int(d.get("logo_size", 30) * 0.5))),
+                        text_height=d.get("text_height", 2.0),
+                        back_height=d.get("back_height", 3.0),
+                        ring_radius=d.get("ring_size", 4.0) / 2,
+                    )), timeout=110)
+            error_note = "\nℹ️ Эмблема недоступна — сделан текстовый вариант."
+
         else:
             error_note = "\n⚠️ Модель не создана — нет исходного контура."
 
@@ -875,6 +895,58 @@ async def get_contact(update: Update, context):
     await update.message.reply_text(t(context, "order_accepted"), parse_mode="Markdown")
     context.user_data.clear()
     return ConversationHandler.END
+
+
+async def diag(update: Update, context):
+    """Диагностика: что установлено и скачано на сервере."""
+    import subprocess, glob
+
+    lines = ["🔍 *ДИАГНОСТИКА СЕРВЕРА*", ""]
+
+    # OpenSCAD
+    try:
+        r = subprocess.run(["openscad", "--version"],
+                           capture_output=True, timeout=15)
+        ver = (r.stdout + r.stderr).decode(errors="replace").strip()[:60]
+        lines.append(f"✅ OpenSCAD: {ver}")
+    except Exception as e:
+        lines.append(f"❌ OpenSCAD: {str(e)[:60]}")
+
+    # potrace
+    try:
+        r = subprocess.run(["potrace", "--version"],
+                           capture_output=True, timeout=15)
+        ver = r.stdout.decode(errors="replace").split("\n")[0][:50]
+        lines.append(f"✅ potrace: {ver}")
+    except Exception as e:
+        lines.append(f"❌ potrace: {str(e)[:60]}")
+
+    # Шрифты
+    fonts = glob.glob("/usr/share/fonts/keychain/*.ttf")
+    lines.append(f"\n🔤 Шрифтов: *{len(fonts)}*")
+    for f in sorted(fonts)[:20]:
+        lines.append(f"   • {Path(f).name}")
+
+    # Эмблемы авто
+    svgs = glob.glob(f"{car_logos.LOGO_DIR}/*.svg")
+    lines.append(f"\n🚗 Эмблем скачано: *{len(svgs)}* из {len(car_logos.CAR_BRANDS)}")
+    if svgs:
+        names = sorted(Path(s).stem for s in svgs)
+        lines.append("   " + ", ".join(names[:25]))
+        if len(names) > 25:
+            lines.append(f"   ...и ещё {len(names) - 25}")
+    else:
+        lines.append("   ⚠️ Ни одной — используется текстовый вариант")
+
+    lines.append(f"\n🎨 Цветов в палитре: *{len(C.labels())}*")
+    lines.append(f"📋 Марок в списке бота: *{len(AVAILABLE_CARS)}*")
+
+    text = "\n".join(lines)
+    for chunk in [text[i:i+3800] for i in range(0, len(text), 3800)]:
+        try:
+            await update.message.reply_text(chunk, parse_mode="Markdown")
+        except Exception:
+            await update.message.reply_text(chunk)
 
 
 async def cancel(update: Update, context):
@@ -985,6 +1057,7 @@ def main():
     )
 
     app.add_handler(conv)
+    app.add_handler(CommandHandler("diag", diag))
     app.add_error_handler(error_handler)
     print("=== POLLING STARTED ===", flush=True)
     app.run_polling(drop_pending_updates=True)
