@@ -1,4 +1,4 @@
-import os, sys, logging, urllib.request, urllib.parse
+import os, sys, logging, asyncio, functools, traceback, urllib.request, urllib.parse
 
 # ── Диагностика при старте (без библиотек) ───────────────────────────────────
 TOKEN   = os.environ.get("BOT_TOKEN", "")
@@ -483,16 +483,27 @@ async def get_contact(update: Update, context):
     if order_type == "named":
         try:
             work_dir = WORK_DIR / str(update.effective_user.id)
-            file_3mf = generate_keychain_3mf(
-                name=d["name"], font=d["font"],
-                back_color=d.get("back_color", "Black"),
-                text_color=d.get("text_color", "Pink"),
-                work_dir=work_dir,
-                font_size=d.get("font_size", 16),
-                text_height=d.get("text_height", 2.0),
-                back_height=d.get("back_height", 3.0),
-                ring_radius=d.get("ring_size", 4.0) / 2,
+            loop = asyncio.get_running_loop()
+            file_3mf = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    functools.partial(
+                        generate_keychain_3mf,
+                        name=d["name"], font=d["font"],
+                        back_color=d.get("back_color", "Black"),
+                        text_color=d.get("text_color", "Pink"),
+                        work_dir=work_dir,
+                        font_size=d.get("font_size", 16),
+                        text_height=d.get("text_height", 2.0),
+                        back_height=d.get("back_height", 3.0),
+                        ring_radius=d.get("ring_size", 4.0) / 2,
+                    ),
+                ),
+                timeout=110,
             )
+        except asyncio.TimeoutError:
+            logger.error("3MF generation timed out")
+            error_note = "\n⚠️ Генерация заняла слишком долго — сделайте файл вручную."
         except Exception as e:
             logger.error(f"3MF error: {e}")
             error_note = "\n⚠️ Файл не сгенерирован — детали в заказе."
@@ -554,6 +565,29 @@ async def cancel(update: Update, context):
     await update.message.reply_text(t(context, "cancelled"))
     return ConversationHandler.END
 
+async def error_handler(update, context):
+    """Catches every unhandled error so the bot never crashes."""
+    err = "".join(traceback.format_exception(
+        type(context.error), context.error, context.error.__traceback__))[-1500:]
+    logger.error(f"Unhandled error: {err}")
+    try:
+        await context.bot.send_message(
+            OWNER_CHAT_ID,
+            f"⚠️ Ошибка в боте (бот продолжает работать):\n\n<code>{err[-800:]}</code>",
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
+    # Tell the user something went wrong, but keep the bot alive
+    try:
+        if isinstance(update, Update) and update.effective_message:
+            await update.effective_message.reply_text(
+                "⚠️ Произошла ошибка. Напишите /start чтобы начать заново."
+            )
+    except Exception:
+        pass
+
+
 async def post_init(app):
     try:
         await app.bot.send_message(chat_id=OWNER_CHAT_ID, text="🤖 Бот запущен и готов к работе!")
@@ -593,8 +627,16 @@ def main():
         fallbacks=[CommandHandler("cancel", cancel)],
     )
     app.add_handler(conv)
+    app.add_error_handler(error_handler)
     print("=== POLLING STARTED ===", flush=True)
-    app.run_polling()
+    app.run_polling(drop_pending_updates=True)
+
 
 if __name__ == "__main__":
-    main()
+    while True:
+        try:
+            main()
+        except Exception as e:
+            print(f"FATAL, restarting in 10s: {e}", flush=True)
+            tg_send(f"🔄 Бот перезапускается после ошибки: {str(e)[:200]}")
+            import time; time.sleep(10)
