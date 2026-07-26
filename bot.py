@@ -329,7 +329,10 @@ async def get_name(update: Update, context):
 
 async def get_font(update: Update, context):
     q = update.callback_query; await q.answer()
-    context.user_data["font"] = q.data
+    if q.data in FONTS_CYRILLIC or q.data in FONTS_LATIN:
+        context.user_data["font"] = q.data
+    else:
+        context.user_data["font"] = "Pacifico"
     await q.edit_message_text(
         t(context, "choose_font_size"),
         reply_markup=kb_data([(f"{s} мм", s) for s in FONT_SIZES], cols=3),
@@ -338,7 +341,10 @@ async def get_font(update: Update, context):
 
 async def get_font_size(update: Update, context):
     q = update.callback_query; await q.answer()
-    context.user_data["font_size"] = int(q.data)
+    try:
+        context.user_data["font_size"] = int(q.data)
+    except ValueError:
+        context.user_data["font_size"] = 16
     await q.edit_message_text(
         t(context, "choose_text_height"),
         parse_mode="Markdown",
@@ -348,7 +354,10 @@ async def get_font_size(update: Update, context):
 
 async def get_text_height(update: Update, context):
     q = update.callback_query; await q.answer()
-    context.user_data["text_height"] = float(q.data)
+    try:
+        context.user_data["text_height"] = float(q.data)
+    except ValueError:
+        context.user_data["text_height"] = 2.0
     await q.edit_message_text(
         t(context, "choose_back_height"),
         parse_mode="Markdown",
@@ -358,7 +367,10 @@ async def get_text_height(update: Update, context):
 
 async def get_back_height(update: Update, context):
     q = update.callback_query; await q.answer()
-    context.user_data["back_height"] = float(q.data)
+    try:
+        context.user_data["back_height"] = float(q.data)
+    except ValueError:
+        context.user_data["back_height"] = 3.0
     await q.edit_message_text(
         t(context, "choose_ring"),
         reply_markup=kb_data([(f"⌀ {r} мм", r) for r in RING_SIZES], cols=4),
@@ -367,7 +379,10 @@ async def get_back_height(update: Update, context):
 
 async def get_ring_size(update: Update, context):
     q = update.callback_query; await q.answer()
-    context.user_data["ring_size"] = float(q.data)
+    try:
+        context.user_data["ring_size"] = float(q.data)
+    except ValueError:
+        context.user_data["ring_size"] = 4.0
     await q.edit_message_text(
         t(context, "choose_text_color"),
         reply_markup=kb(list(COLORS.keys()), cols=2),
@@ -377,7 +392,7 @@ async def get_ring_size(update: Update, context):
 async def get_text_color(update: Update, context):
     q = update.callback_query; await q.answer()
     context.user_data["text_color_label"] = q.data
-    context.user_data["text_color"] = COLORS[q.data]
+    context.user_data["text_color"] = COLORS.get(q.data, "Pink")
     await q.edit_message_text(
         t(context, "choose_back_color"),
         reply_markup=kb(list(BACK_COLORS.keys()), cols=2),
@@ -385,41 +400,99 @@ async def get_text_color(update: Update, context):
     return BACK_COLOR
 
 async def get_back_color(update: Update, context):
-    q = update.callback_query; await q.answer()
-    context.user_data["back_color_label"] = q.data
-    context.user_data["back_color"] = BACK_COLORS[q.data]
+    q = update.callback_query
+    await q.answer()
+
+    d = context.user_data
+    d["back_color_label"] = q.data
+    d["back_color"] = BACK_COLORS.get(q.data, "Black")
+
+    # ── Значения по умолчанию, чтобы никогда не было KeyError ───────────────
+    d.setdefault("name", "Keychain")
+    d.setdefault("font", "Pacifico")
+    d.setdefault("font_size", 16)
+    d.setdefault("text_height", 2.0)
+    d.setdefault("back_height", 3.0)
+    d.setdefault("ring_size", 4.0)
+    d.setdefault("text_color", "Pink")
+    d.setdefault("text_color_label", "Розовый 🩷 / Pink")
 
     await q.edit_message_text(t(context, "generating_preview"))
 
-    d = context.user_data
-    preview_path = generate_preview(
-        d["name"], d["font"], d["text_color"], d["back_color"]
-    )
+    lang       = d.get("lang", "ru")
+    order_type = d.get("type", "named")
 
-    lang = d.get("lang", "ru")
-    caption = (
-        f"{T[lang]['your_keychain']}\n\n"
-        f"{T[lang]['name_lbl']}: *{d['name']}*\n"
-        f"{T[lang]['font_lbl']}: *{d['font']}*\n"
-        f"{T[lang]['size_lbl']}: *{d['font_size']} мм*\n"
-        f"{T[lang]['text_h_lbl']}: *{d['text_height']} мм*\n"
-        f"{T[lang]['back_h_lbl']}: *{d['back_height']} мм*\n"
-        f"{T[lang]['ring_lbl']}: *⌀{d['ring_size']} мм*\n"
-        f"{T[lang]['text_c_lbl']}: *{d['text_color_label']}*\n"
-        f"{T[lang]['back_c_lbl']}: *{d['back_color_label']}*"
-    )
+    # ── Собираем описание заказа ────────────────────────────────────────────
+    if order_type == "named":
+        caption = (
+            f"{T[lang]['your_keychain']}\n\n"
+            f"{T[lang]['name_lbl']}: *{d['name']}*\n"
+            f"{T[lang]['font_lbl']}: *{d['font']}*\n"
+            f"{T[lang]['size_lbl']}: *{d['font_size']} мм*\n"
+            f"{T[lang]['text_h_lbl']}: *{d['text_height']} мм*\n"
+            f"{T[lang]['back_h_lbl']}: *{d['back_height']} мм*\n"
+            f"{T[lang]['ring_lbl']}: *⌀{d['ring_size']} мм*\n"
+            f"{T[lang]['text_c_lbl']}: *{d['text_color_label']}*\n"
+            f"{T[lang]['back_c_lbl']}: *{d['back_color_label']}*"
+        )
+    elif order_type == "car":
+        caption = (
+            f"{T[lang]['your_keychain']}\n\n"
+            f"🚗 *{d.get('car_brand', '?')}*\n"
+            f"{T[lang]['back_c_lbl']}: *{d['back_color_label']}*"
+        )
+    else:  # logo
+        caption = (
+            f"{T[lang]['your_keychain']}\n\n"
+            f"🖼️ *Ваш логотип*\n"
+            f"{T[lang]['back_c_lbl']}: *{d['back_color_label']}*"
+        )
+
     confirm_kb = InlineKeyboardMarkup([
         [InlineKeyboardButton(t(context, "order_btn"),   callback_data="confirm")],
         [InlineKeyboardButton(t(context, "restart_btn"), callback_data="restart")],
     ])
-    await q.message.delete()
-    with open(preview_path, "rb") as f:
-        await context.bot.send_photo(
-            chat_id=q.message.chat_id, photo=f,
-            caption=caption, parse_mode="Markdown",
-            reply_markup=confirm_kb,
+
+    chat_id = q.message.chat_id
+
+    # ── Превью только для именного брелока ──────────────────────────────────
+    preview_path = None
+    if order_type == "named":
+        try:
+            preview_path = generate_preview(
+                d["name"], d["font"], d["text_color"], d["back_color"]
+            )
+            if not preview_path or not Path(preview_path).exists():
+                logger.error(f"Preview file missing: {preview_path}")
+                preview_path = None
+        except Exception as e:
+            logger.error(f"Preview error: {e}")
+            preview_path = None
+
+    try:
+        await q.message.delete()
+    except Exception:
+        pass
+
+    if preview_path:
+        with open(preview_path, "rb") as f:
+            await context.bot.send_photo(
+                chat_id=chat_id, photo=f, caption=caption,
+                parse_mode="Markdown", reply_markup=confirm_kb,
+            )
+    elif order_type == "logo" and d.get("logo_path") and Path(d["logo_path"]).exists():
+        with open(d["logo_path"], "rb") as f:
+            await context.bot.send_photo(
+                chat_id=chat_id, photo=f, caption=caption,
+                parse_mode="Markdown", reply_markup=confirm_kb,
+            )
+    else:
+        await context.bot.send_message(
+            chat_id=chat_id, text=caption,
+            parse_mode="Markdown", reply_markup=confirm_kb,
         )
     return CONFIRM
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  ВЕТКА 2: БРЕЛОК С ЛОГОТИПОМ
@@ -435,6 +508,13 @@ async def get_logo(update: Update, context):
     await file.download_to_drive(logo_path)
     context.user_data["logo_path"] = logo_path
     context.user_data["name"] = "Логотип"
+    context.user_data["font"] = "Pacifico"
+    context.user_data["font_size"] = 16
+    context.user_data["text_height"] = 2.0
+    context.user_data["back_height"] = 3.0
+    context.user_data["ring_size"] = 4.0
+    context.user_data["text_color"] = "White"
+    context.user_data["text_color_label"] = "Белый ⬜ / White"
     await update.message.reply_text(
         t(context, "choose_back_color"),
         reply_markup=kb(list(BACK_COLORS.keys()), cols=2),
@@ -454,6 +534,8 @@ async def get_car_brand(update: Update, context):
     context.user_data["text_height"] = 2.0
     context.user_data["back_height"] = 3.0
     context.user_data["ring_size"] = 4.0
+    context.user_data["text_color"] = "White"
+    context.user_data["text_color_label"] = "Белый ⬜ / White"
     await q.edit_message_text(
         t(context, "choose_back_color"),
         reply_markup=kb(list(BACK_COLORS.keys()), cols=2),
@@ -480,10 +562,19 @@ async def confirm(update: Update, context):
             reply_markup=lang_kb,
         )
         return LANG
-    await q.edit_message_caption(
-        (q.message.caption or "") + "\n\n✅ Оформляем заказ!",
-        parse_mode="Markdown",
-    )
+    try:
+        if q.message.caption is not None:
+            await q.edit_message_caption(
+                q.message.caption + "\n\n✅ Оформляем заказ!",
+                parse_mode="Markdown",
+            )
+        else:
+            await q.edit_message_text(
+                (q.message.text or "") + "\n\n✅ Оформляем заказ!",
+                parse_mode="Markdown",
+            )
+    except Exception:
+        pass
     await context.bot.send_message(
         chat_id=q.message.chat_id,
         text=t(context, "enter_contact"),
@@ -573,14 +664,14 @@ async def get_contact(update: Update, context):
         await context.bot.send_message(OWNER_CHAT_ID, plain)
 
     # Если есть логотип — пересылаем владельцу
-    if order_type == "logo" and d.get("logo_path"):
+    if order_type == "logo" and d.get("logo_path") and Path(d["logo_path"]).exists():
         try:
             with open(d["logo_path"], "rb") as f:
                 await context.bot.send_photo(OWNER_CHAT_ID, photo=f, caption="🖼️ Логотип клиента")
         except Exception: pass
 
     # Если есть 3MF — отправляем файл
-    if file_3mf:
+    if file_3mf and Path(file_3mf).exists():
         with open(file_3mf, "rb") as f:
             await context.bot.send_document(
                 OWNER_CHAT_ID, document=f,
