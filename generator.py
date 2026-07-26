@@ -72,21 +72,84 @@ module label() {{
 
 # ── STL parser ────────────────────────────────────────────────────────────────
 
-def parse_stl(stl_bytes: bytes):
+def _parse_stl_binary(b: bytes):
+    """Двоичный STL."""
     offset = 80
-    n_tris = struct.unpack_from("<I", stl_bytes, offset)[0]
+    n_tris = struct.unpack_from("<I", b, offset)[0]
     offset += 4
+
+    expected = 84 + n_tris * 50
+    if len(b) < expected:
+        raise ValueError(
+            f"Повреждённый binary STL: заявлено {n_tris} треугольников "
+            f"({expected} байт), фактически {len(b)} байт"
+        )
+
     vertices, triangles, vmap = [], [], {}
     for _ in range(n_tris):
-        offset += 12
+        offset += 12  # нормаль пропускаем
         tri = []
         for _ in range(3):
-            v = struct.unpack_from("<3f", stl_bytes, offset); offset += 12
+            v = struct.unpack_from("<3f", b, offset); offset += 12
             if v not in vmap:
                 vmap[v] = len(vertices); vertices.append(v)
             tri.append(vmap[v])
-        triangles.append(tri); offset += 2
+        triangles.append(tri)
+        offset += 2  # атрибут
     return vertices, triangles
+
+
+def _parse_stl_ascii(b: bytes):
+    """Текстовый STL — именно его OpenSCAD выдаёт по умолчанию."""
+    text = b.decode("utf-8", errors="replace")
+    vertices, triangles, vmap = [], [], {}
+    current = []
+
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("vertex"):
+            if line.startswith("endloop") and len(current) == 3:
+                triangles.append(current)
+                current = []
+            continue
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        try:
+            v = (float(parts[1]), float(parts[2]), float(parts[3]))
+        except ValueError:
+            continue
+        if v not in vmap:
+            vmap[v] = len(vertices); vertices.append(v)
+        current.append(vmap[v])
+        if len(current) == 3:
+            triangles.append(current)
+            current = []
+
+    if not triangles:
+        raise ValueError("ASCII STL не содержит треугольников (пустая модель)")
+    return vertices, triangles
+
+
+def parse_stl(stl_bytes: bytes):
+    """Автоматически определяет формат STL и разбирает его."""
+    if not stl_bytes or len(stl_bytes) < 15:
+        raise ValueError(f"STL слишком мал: {len(stl_bytes)} байт")
+
+    head = stl_bytes[:80].lstrip()
+
+    # ASCII STL начинается со слова "solid" и содержит "facet"
+    looks_ascii = head[:5].lower() == b"solid" and b"facet" in stl_bytes[:2000].lower()
+
+    if looks_ascii:
+        return _parse_stl_ascii(stl_bytes)
+
+    try:
+        return _parse_stl_binary(stl_bytes)
+    except Exception:
+        # На всякий случай пробуем как текст
+        return _parse_stl_ascii(stl_bytes)
+
 
 # ── 3MF builder ───────────────────────────────────────────────────────────────
 
@@ -149,9 +212,15 @@ def build_3mf(back_stl, text_stl, back_color, text_color, output_path):
 def _render_stl(scad_text, out_stl, timeout=60):
     scad_file = Path(str(out_stl).replace(".stl", ".scad"))
     scad_file.write_text(scad_text, encoding="utf-8")
-    cmd = ["xvfb-run", "--auto-servernum", "openscad",
-           "--render", "-o", str(out_stl), str(scad_file)]
+    # Пробуем binary STL; если версия OpenSCAD не знает флаг — обычный вызов
+    cmd = ["xvfb-run", "--auto-servernum", "openscad", "--render",
+           "--export-format", "binstl", "-o", str(out_stl), str(scad_file)]
     result = subprocess.run(cmd, capture_output=True, timeout=timeout)
+
+    if result.returncode != 0 and b"export-format" in result.stderr.lower():
+        cmd = ["xvfb-run", "--auto-servernum", "openscad", "--render",
+               "-o", str(out_stl), str(scad_file)]
+        result = subprocess.run(cmd, capture_output=True, timeout=timeout)
 
     stderr = result.stderr.decode(errors="replace")
     if result.returncode != 0:
