@@ -82,8 +82,12 @@ def download_all():
 
     bases = [
         "https://cdn.jsdelivr.net/npm/simple-icons@13/icons/{slug}.svg",
+        "https://cdn.jsdelivr.net/npm/simple-icons@11/icons/{slug}.svg",
+        "https://cdn.jsdelivr.net/gh/simple-icons/simple-icons@develop/icons/{slug}.svg",
         "https://unpkg.com/simple-icons@13/icons/{slug}.svg",
+        "https://unpkg.com/simple-icons@11/icons/{slug}.svg",
         "https://raw.githubusercontent.com/simple-icons/simple-icons/develop/icons/{slug}.svg",
+        "https://fastly.jsdelivr.net/npm/simple-icons@13/icons/{slug}.svg",
     ]
     headers = {"User-Agent": "Mozilla/5.0 (compatible; logo-fetch/1.0)"}
 
@@ -119,7 +123,14 @@ def download_all():
             if slug not in failed_names:
                 f.write(f"{name}|{slug}\n")
 
+    with open(f"{LOGO_DIR}/download.log", "w", encoding="utf-8") as f:
+        f.write(f"Скачано: {ok} из {len(CAR_BRANDS)}\n")
+        if failed_names:
+            f.write("Не удалось: " + ", ".join(failed_names) + "\n")
+
     print(f"\nЭмблемы: {ok} скачано, {fail} пропущено.", flush=True)
+    if ok == 0:
+        print("ВНИМАНИЕ: ни одной эмблемы. Бот будет делать текстовые брелоки.", flush=True)
 
 
 def load_available():
