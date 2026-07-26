@@ -97,14 +97,21 @@ def cleanup_old_files(max_age_sec=600):
 T = {
     "ru": {
         "welcome": (
-            "👋 Добро пожаловать в магазин именных 3D-брелоков!\n\n"
-            "🎨 Мы создаём уникальные брелоки на заказ:\n"
-            "• Именные с любым шрифтом\n"
-            "• С вашим логотипом\n"
-            "• С эмблемой любимого авто\n\n"
-            "🖨️ Печатаем на профессиональном принтере Bambu Lab\n"
-            "⚡ Срок: 1-2 дня | 💎 Качество: премиум\n\n"
-            "Выберите тип брелока:"
+            "👋 *Добро пожаловать в 3d brelok.tj!*\n\n"
+            "Мы печатаем брелоки на заказ — вы собираете свой прямо здесь, "
+            "в боте, и сразу видите как он будет выглядеть.\n\n"
+            "*Что умеет этот бот:*\n\n"
+            "1️⃣ Собрать брелок под вас — имя, шрифт, размер, цвета\n"
+            "2️⃣ Показать превью до заказа — вы видите результат заранее\n"
+            "3️⃣ Принять ваш логотип — пришлёте картинку, сделаем объёмной\n"
+            "4️⃣ Оформить заказ за пару минут — без звонков и переписки\n\n"
+            "*Что можно заказать:*\n"
+            "🏷️ Именной — любое имя или слово\n"
+            "🎨 С логотипом — ваш бренд или рисунок\n"
+            "🚗 С эмблемой авто — 60 марок на выбор\n\n"
+            "🖨️ Печать на Bambu Lab  ⚡ Готово за 1–2 дня\n"
+            "🎨 14 цветов  💎 Двухцветная печать\n\n"
+            "👇 *С чего начнём?*"
         ),
         "choose_type": "🔑 Какой брелок вы хотите?",
         "type_named": "🏷️ Именной брелок",
@@ -140,13 +147,21 @@ T = {
     },
     "tj": {
         "welcome": (
-            "👋 Хуш омадед ба мағозаи тасмаҳои калиди 3D!\n\n"
-            "🎨 Мо тасмаҳои калиди фармоишӣ месозем:\n"
-            "• Бо ном ва хати дилхоҳ\n"
-            "• Бо логотипи шумо\n"
-            "• Бо нишони мошини дӯстдоштаи шумо\n\n"
-            "🖨️ Чопи касбӣ | ⚡ Мӯҳлат: 1-2 рӯз | 💎 Сифат: аъло\n\n"
-            "Намуди тасмаи калидро интихоб кунед:"
+            "👋 *Хуш омадед ба 3d brelok.tj!*\n\n"
+            "Мо тасмаҳои калид бо фармоиш чоп мекунем — шумо онро "
+            "ҳозир дар бот месозед ва натиҷаро пешакӣ мебинед.\n\n"
+            "*Ин бот чӣ кор карда метавонад:*\n\n"
+            "1️⃣ Тасмаи калиди шахсӣ месозад — ном, хат, андоза, рангҳо\n"
+            "2️⃣ Пеш аз фармоиш тасвирро нишон медиҳад\n"
+            "3️⃣ Логотипи шуморо қабул мекунад — акс фиристед\n"
+            "4️⃣ Фармоишро дар ду дақиқа қабул мекунад\n\n"
+            "*Чиро фармоиш додан мумкин аст:*\n"
+            "🏷️ Номӣ — ҳар ном ё калима\n"
+            "🎨 Бо логотип — бренд ё расми шумо\n"
+            "🚗 Бо нишони мошин — 60 марка\n\n"
+            "🖨️ Чоп дар Bambu Lab  ⚡ 1–2 рӯз\n"
+            "🎨 14 ранг  💎 Чопи дуранга\n\n"
+            "👇 *Аз чӣ оғоз кунем?*"
         ),
         "choose_type": "🔑 Кадом тасмаи калид мехоҳед?",
         "type_named": "🏷️ Тасмаи калиди номӣ",
@@ -182,13 +197,21 @@ T = {
     },
     "en": {
         "welcome": (
-            "👋 Welcome to the 3D Keychain Shop!\n\n"
-            "🎨 We create custom keychains:\n"
-            "• Named keychains with any font\n"
-            "• With your logo\n"
-            "• With your favourite car brand\n\n"
-            "🖨️ Printed on Bambu Lab | ⚡ Ready in 1-2 days | 💎 Premium quality\n\n"
-            "Choose your keychain type:"
+            "👋 *Welcome to 3d brelok.tj!*\n\n"
+            "We print custom keychains — you design yours right here "
+            "in the bot and see how it looks before ordering.\n\n"
+            "*What this bot can do:*\n\n"
+            "1️⃣ Build your keychain — name, font, size, colours\n"
+            "2️⃣ Show a preview before you order\n"
+            "3️⃣ Take your own logo — send a picture, we make it 3D\n"
+            "4️⃣ Place the order in two minutes — no calls needed\n\n"
+            "*What you can order:*\n"
+            "🏷️ Named — any name or word\n"
+            "🎨 With a logo — your brand or artwork\n"
+            "🚗 Car emblem — 60 brands to choose from\n\n"
+            "🖨️ Printed on Bambu Lab  ⚡ Ready in 1–2 days\n"
+            "🎨 14 colours  💎 Dual-colour printing\n\n"
+            "👇 *Where shall we start?*"
         ),
         "choose_type": "🔑 What keychain do you want?",
         "type_named": "🏷️ Named keychain",
@@ -256,7 +279,7 @@ BACK_HEIGHTS = ["2", "3", "4", "5"]
 RING_SIZES   = ["3", "4", "5", "6"]
 LOGO_SIZES   = ["20", "25", "30", "35", "40", "50"]
 
-COLORS_PER_PAGE = 12
+COLORS_PER_PAGE = 14
 CARS_PER_PAGE   = 12
 
 AVAILABLE_CARS = car_logos.load_available()
@@ -347,7 +370,8 @@ async def get_lang(update: Update, context):
         [InlineKeyboardButton(t(context, "type_logo"),  callback_data="logo")],
         [InlineKeyboardButton(t(context, "type_car"),   callback_data="car")],
     ])
-    await q.edit_message_text(t(context, "welcome"), reply_markup=type_kb)
+    await q.edit_message_text(
+        t(context, "welcome"), reply_markup=type_kb, parse_mode="Markdown")
     return TYPE
 
 
@@ -1003,13 +1027,49 @@ async def periodic_cleanup(context):
 
 
 async def post_init(app):
+    # Меню команд — видно по кнопке «/» в чате
+    try:
+        from telegram import BotCommand
+        await app.bot.set_my_commands([
+            BotCommand("start", "Создать брелок"),
+            BotCommand("cancel", "Отменить заказ"),
+        ])
+    except Exception as e:
+        print(f"set_my_commands: {e}", flush=True)
+
+    # Короткое описание — показывается в профиле бота
+    try:
+        await app.bot.set_my_short_description(
+            "Именные 3D-брелоки на заказ. Соберите свой в боте за 2 минуты 🔑"
+        )
+    except Exception as e:
+        print(f"short_description: {e}", flush=True)
+
+    # Полное описание — экран до нажатия «Запустить»
+    try:
+        await app.bot.set_my_description(
+            "🔑 3d brelok.tj — брелоки на 3D-принтере\n\n"
+            "Что умеет бот:\n"
+            "• Собрать брелок под вас: имя, шрифт, размер, цвета\n"
+            "• Показать превью до заказа\n"
+            "• Принять ваш логотип и сделать его объёмным\n"
+            "• Оформить заказ за пару минут\n\n"
+            "Что можно заказать:\n"
+            "🏷️ Именной  🎨 С логотипом  🚗 С эмблемой авто\n\n"
+            "⚡ Готово за 1–2 дня  🎨 14 цветов\n\n"
+            "Нажмите «Запустить», чтобы начать 👇"
+        )
+    except Exception as e:
+        print(f"description: {e}", flush=True)
+
     try:
         await app.bot.send_message(
             chat_id=OWNER_CHAT_ID,
             text=(f"🤖 Бот запущен!\n\n"
                   f"🎨 Цветов: {len(C.labels())}\n"
                   f"🚗 Марок авто: {len(AVAILABLE_CARS)}\n"
-                  f"🔤 Шрифтов: {len(set(FONTS_CYRILLIC) | set(FONTS_LATIN))}"))
+                  f"🔤 Шрифтов: {len(set(FONTS_CYRILLIC) | set(FONTS_LATIN))}\n\n"
+                  f"/diag — проверить что установлено на сервере"))
     except Exception as e:
         print(f"post_init error: {e}", flush=True)
 
