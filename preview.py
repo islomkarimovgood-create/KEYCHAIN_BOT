@@ -25,14 +25,22 @@ COLOR_MAP = {
 }
 
 FONT_FILES = {
+    # Кириллица + латиница
     "Pacifico":       "Pacifico-Regular.ttf",
     "Lobster":        "Lobster-Regular.ttf",
+    "Russo One":      "RussoOne-Regular.ttf",
+    "Yeseva One":     "YesevaOne-Regular.ttf",
+    "Neucha":         "Neucha.ttf",
+    "Play":           "Play-Bold.ttf",
+    "Comfortaa":      "Comfortaa-Bold.ttf",
+    "Ruslan Display": "RuslanDisplay.ttf",
+    # Только латиница
     "Cookie":         "Cookie-Regular.ttf",
-    "Dancing Script": "DancingScript-Bold.ttf",
-    "Satisfy":         "Satisfy-Regular.ttf",
-    "Righteous":       "Righteous-Regular.ttf",
     "Courgette":      "Courgette-Regular.ttf",
     "Bangers":        "Bangers-Regular.ttf",
+    "Satisfy":        "Satisfy-Regular.ttf",
+    "Righteous":      "Righteous-Regular.ttf",
+    "Dancing Script": "DancingScript-Bold.ttf",
 }
 
 
@@ -59,9 +67,15 @@ def generate_preview(
 
     # Load font (fall back to default if file missing)
     font_file = FONT_DIR / FONT_FILES.get(font_name, "Pacifico-Regular.ttf")
-    try:
-        pil_font = ImageFont.truetype(str(font_file), 72)
-    except Exception:
+    pil_font = None
+    for candidate in (font_file, FONT_DIR / "Pacifico-Regular.ttf",
+                      FONT_DIR / "Lobster-Regular.ttf"):
+        try:
+            pil_font = ImageFont.truetype(str(candidate), 72)
+            break
+        except Exception:
+            continue
+    if pil_font is None:
         pil_font = ImageFont.load_default()
 
     # Measure text
