@@ -979,6 +979,117 @@ async def diag(update: Update, context):
             await update.message.reply_text(chunk)
 
 
+async def trylogo_cmd(update: Update, context):
+    """/trylogo bmw — показывает какой именно источник не отвечает."""
+    args = context.args or []
+    if not args:
+        missing = [sl for _, sl in car_logos.CAR_BRANDS
+                   if sl not in set(car_logos.downloaded_slugs())]
+        await update.message.reply_text(
+            "Использование: `/trylogo <марка>`\n\n"
+            "Например: `/trylogo lexus`\n\n"
+            "Не хватает:\n" + ", ".join(missing[:30]),
+            parse_mode="Markdown")
+        return
+
+    slug = args[0].lower().strip()
+    msg = await update.message.reply_text(f"⏳ Проверяю источники для *{slug}*...",
+                                          parse_mode="Markdown")
+    loop = asyncio.get_running_loop()
+    try:
+        report = await asyncio.wait_for(
+            loop.run_in_executor(None, functools.partial(car_logos.probe, slug)),
+            timeout=180)
+    except Exception as e:
+        report = [f"Ошибка проверки: {e}"]
+
+    try:
+        await msg.delete()
+    except Exception:
+        pass
+
+    text = f"🔍 Источники для «{slug}»:\n\n" + "\n".join(report[:25])
+    await update.message.reply_text(text[:4000])
+
+
+async def addlogo_cmd(update: Update, context):
+    """/addlogo — инструкция как добавить эмблему вручную."""
+    missing = [sl for _, sl in car_logos.CAR_BRANDS
+               if sl not in set(car_logos.downloaded_slugs())]
+    await update.message.reply_text(
+        "🖼️ *Добавить эмблему вручную*\n\n"
+        "1. Найдите логотип марки в интернете — чёрный силуэт на белом фоне\n"
+        "2. Пришлите его сюда *фотографией*\n"
+        "3. В подписи к фото напишите: `логотип <марка>`\n\n"
+        "Например, подпись: `логотип lexus`\n\n"
+        "Бот переведёт картинку в контур и пришлёт вам готовый SVG-файл — "
+        "положите его в папку `carlogos` на GitHub, чтобы эмблема "
+        "сохранилась навсегда.\n\n"
+        "*Сейчас не хватает:*\n" + ", ".join(missing[:30]),
+        parse_mode="Markdown")
+
+
+async def owner_photo(update: Update, context):
+    """Фото от владельца с подписью «логотип <марка>» — добавляем эмблему."""
+    if str(update.effective_user.id) != str(OWNER_CHAT_ID):
+        return
+    caption = (update.message.caption or "").strip().lower()
+    if not caption.startswith(("логотип", "logo")):
+        return
+
+    parts = caption.split()
+    if len(parts) < 2:
+        await update.message.reply_text("Укажите марку: `логотип lexus`",
+                                        parse_mode="Markdown")
+        return
+
+    slug = parts[1].strip()
+    msg = await update.message.reply_text(f"⏳ Обрабатываю эмблему *{slug}*...",
+                                          parse_mode="Markdown")
+
+    photo = update.message.photo[-1]
+    file  = await context.bot.get_file(photo.file_id)
+    src   = f"/tmp/brand_{slug}.jpg"
+    dst   = f"/tmp/brand_{slug}.svg"
+    await file.download_to_drive(src)
+
+    try:
+        loop = asyncio.get_running_loop()
+        async with GEN_LOCK:
+            await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, functools.partial(image_to_svg, src, dst)),
+                timeout=60)
+
+        with open(dst, "rb") as f:
+            svg_bytes = f.read()
+        saved = car_logos.save_svg(slug, svg_bytes)
+        car_logos.add_brand(slug.upper(), slug)
+        refresh_cars()
+
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+
+        with open(saved, "rb") as f:
+            await update.message.reply_document(
+                document=f, filename=f"{slug}.svg",
+                caption=(f"✅ Эмблема *{slug}* добавлена!\n\n"
+                         f"Всего эмблем: {car_logos.count_downloaded()}\n\n"
+                         f"Чтобы она осталась после перезапуска — положите "
+                         f"этот файл в папку `carlogos` на GitHub."),
+                parse_mode="Markdown")
+    except Exception as e:
+        try:
+            await msg.delete()
+        except Exception:
+            pass
+        await update.message.reply_text(f"❌ Не получилось: {str(e)[:300]}")
+    finally:
+        cleanup_temp(src, dst)
+
+
 async def cancel(update: Update, context):
     await update.message.reply_text(t(context, "cancelled"))
     context.user_data.clear()
@@ -1179,6 +1290,10 @@ def main():
     app.add_handler(conv)
     app.add_handler(CommandHandler("diag", diag))
     app.add_handler(CommandHandler("logos", logos_cmd))
+    app.add_handler(CommandHandler("trylogo", trylogo_cmd))
+    app.add_handler(CommandHandler("addlogo", addlogo_cmd))
+    app.add_handler(MessageHandler(
+        filters.PHOTO & filters.CaptionRegex(r"(?i)^(логотип|logo)\s"), owner_photo))
     app.add_error_handler(error_handler)
     print("=== POLLING STARTED ===", flush=True)
     app.run_polling(drop_pending_updates=True)
