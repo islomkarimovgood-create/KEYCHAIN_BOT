@@ -10,19 +10,13 @@ from PIL import Image, ImageDraw, ImageFont
 FONT_DIR = Path("/usr/share/fonts/keychain")
 PREVIEW_DIR = Path("/tmp/previews")
 
-COLOR_MAP = {
-    "Black":     (25, 25, 25),
-    "White":     (245, 245, 245),
-    "Gray":      (130, 130, 130),
-    "Red":       (210, 45, 45),
-    "Blue":      (50, 100, 210),
-    "Green":     (45, 175, 75),
-    "Pink":      (255, 140, 175),
-    "Purple":    (155, 75, 205),
-    "Turquoise": (60, 195, 215),
-    "Yellow":    (255, 205, 0),
-    "Orange":    (255, 135, 0),
-}
+# Палитра берётся из colors.py — один источник правды
+try:
+    from colors import COLOR_MAP
+except Exception:
+    COLOR_MAP = {
+        "Black": (24, 24, 24), "White": (245, 245, 245), "Gray": (128, 128, 128),
+    }
 
 FONT_FILES = {
     # Кириллица + латиница
