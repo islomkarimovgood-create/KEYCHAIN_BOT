@@ -633,10 +633,18 @@ def main():
 
 
 if __name__ == "__main__":
-    while True:
-        try:
-            main()
-        except Exception as e:
-            print(f"FATAL, restarting in 10s: {e}", flush=True)
-            tg_send(f"🔄 Бот перезапускается после ошибки: {str(e)[:200]}")
-            import time; time.sleep(10)
+    # Запускаем один раз. При падении процесса Railway сам его перезапустит
+    # (restartPolicyType = ON_FAILURE в railway.toml) — это надёжнее чем
+    # перезапуск внутри процесса, где event loop уже закрыт.
+    try:
+        main()
+    except Exception as e:
+        msg = str(e)[:300]
+        print(f"FATAL: {msg}", flush=True)
+        if "Conflict" in msg or "terminated by other" in msg:
+            tg_send("⚠️ Обнаружен ВТОРОЙ запущенный экземпляр бота!\n\n"
+                    "Зайдите на Railway и удалите лишний проект/деплой — "
+                    "иначе боты будут конфликтовать.")
+        else:
+            tg_send(f"❌ Бот остановлен: {msg}")
+        sys.exit(1)
